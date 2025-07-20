@@ -27,6 +27,7 @@ from infinigen.core.constraints import constraint_language as cl
 from infinigen.core.constraints import usage_lookup
 from infinigen.core.constraints.constraint_language.constants import RoomConstants
 from infinigen.core.tags import Semantics, Subpart
+import infinigen.assets.static_assets as static_assets
 
 from . import util as cu
 from .semantics import home_asset_usage
@@ -969,7 +970,8 @@ def home_furniture_constraints():
         kitchens, cu.on_floor
     ).related_to(kitchens, cu.against_wall)
     microwaves = (
-        kitchen_appliances[appliances.MicrowaveFactory]
+        # kitchen_appliances[appliances.MicrowaveFactory]
+        kitchen_appliances[static_assets.StaticMicrowaveFactory] # TODO
         .related_to(wallcounter, cu.on)
         .related_to(wallcounter, cu.back_coplanar_back)
     )
@@ -989,7 +991,7 @@ def home_furniture_constraints():
                 == 1
             )
             * (wallfurn[shelves.KitchenCabinetFactory].related_to(r).count() >= 0)
-            * (microwaves.related_to(wallcounter.related_to(r)).count().in_range(0, 1))
+            * (microwaves.related_to(wallcounter.related_to(r)).count().in_range(1, 1))
         )
     )
 

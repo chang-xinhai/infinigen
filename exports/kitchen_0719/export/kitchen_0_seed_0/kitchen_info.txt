@@ -1,0 +1,21 @@
+Kitchen Scene Information
+========================
+Scene ID: 0
+Random Seed: 0
+Generated: Sat Jul 19 06:14:37 PM CST 2025
+Texture Resolution: 1024x1024
+
+Timing Information:
+- Generation Time: 23m 44s
+- Export Time: 0m 1s
+- Total Time: 23m 45s
+
+Configuration:
+- Lighting: compose_indoors.lights_off_chance=0.0 nishita_lighting.strength=0.4 nishita_lighting.sun_elevation=60 configure_render_cycles.exposure=2.5
+- Object Density: compose_indoors.solve_steps_large=100 compose_indoors.solve_steps_medium=40 compose_indoors.solve_steps_small=5
+- Floating Objects: compose_indoors.floating_objs_enabled=False
+
+File Locations:
+- Blender Scene: outputs/kitchen_0719/dataset/kitchen_0_seed_0/scene.blend
+- USD Export: exports/kitchen_0719/export/kitchen_0_seed_0/export_scene.blend/export_scene.usdc
+- Physics Data: exports/kitchen_0719/export/kitchen_0_seed_0/export_scene.blend/solve_state.json

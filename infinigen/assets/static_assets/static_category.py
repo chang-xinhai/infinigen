@@ -15,7 +15,7 @@ from infinigen.core.util.math import FixedSeed
 
 
 def static_category_factory(
-    path_to_assets: str,
+    asset_type: str,
     tag_support=False,
     x_dim: float = None,
     y_dim: float = None,
@@ -30,22 +30,32 @@ def static_category_factory(
     """
 
     class StaticCategoryFactory(StaticAssetFactory):
-        def __init__(self, factory_seed, coarse=False):
+        def __init__(self, factory_seed, coarse=False, asset_type=asset_type):
+            self.asset_type = asset_type
+            self.path_to_assets = f"infinigen/assets/static_assets/source/{self.asset_type}"
+            self.asset_dir = self.path_to_assets
+            asset_files = [
+                f
+                for f in os.listdir(self.asset_dir)
+                if f.lower().endswith(tuple(self.import_map.keys()))
+            ]
+            if not asset_files or len(asset_files) == 0:
+                raise ValueError(f"No valid asset files found in {self.asset_dir}")
+            self.asset_file = random.choice(asset_files)
+            
             super().__init__(factory_seed, coarse)
             with FixedSeed(factory_seed):
-                self.path_to_assets = path_to_assets
                 self.tag_support = tag_support
-                self.asset_dir = path_to_assets
                 self.x_dim, self.y_dim, self.z_dim = x_dim, y_dim, z_dim
                 self.rotation_euler = rotation_euler
-                asset_files = [
-                    f
-                    for f in os.listdir(self.asset_dir)
-                    if f.lower().endswith(tuple(self.import_map.keys()))
-                ]
-                if not asset_files or len(asset_files) == 0:
-                    raise ValueError(f"No valid asset files found in {self.asset_dir}")
-                self.asset_file = random.choice(asset_files)
+
+                print(f"[StaticCategoryFactory] Selected asset file: {self.asset_file} from {self.asset_dir}, asset type: {self.asset_type}, factory seed: {self.factory_seed}")
+        
+        # Custom string representation for the StaticCategoryFactory
+        def __repr__(self):
+            if self.asset_type:
+                return f"{self.__class__.__name__}({self.asset_type}_{self.asset_file}_{self.factory_seed})"
+            return super().__repr__()
 
         def create_asset(self, **params) -> bpy.types.Object:
             file_path = os.path.join(self.asset_dir, self.asset_file)
@@ -86,12 +96,7 @@ def static_category_factory(
 
 
 # Create factory instances for different categories
-StaticSofaFactory = static_category_factory(
-    "infinigen/assets/static_assets/source/Sofa"
-)
-StaticTableFactory = static_category_factory(
-    "infinigen/assets/static_assets/source/Table"
-)
-StaticShelfFactory = static_category_factory(
-    "infinigen/assets/static_assets/source/Shelf", tag_support=True, z_dim=2
-)
+StaticSofaFactory = static_category_factory("Sofa")
+StaticTableFactory = static_category_factory("Table")
+StaticShelfFactory = static_category_factory("Shelf", tag_support=True, z_dim=2)
+StaticMicrowaveFactory = static_category_factory("Microwave")
