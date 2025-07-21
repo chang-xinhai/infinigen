@@ -16,6 +16,12 @@ compose_indoors.solve_steps_small = 5
 # Use kitchen_only mode - this is our custom approach
 home_room_constraints.kitchen_only = True
 home_room_constraints.has_fewer_rooms = False
+home_furniture_constraints.kitchen_only = True
 
 # Disable terrain to avoid errors
 compose_indoors.terrain_enabled = False
+
+# Increase kitchen size constraints for better counter/island placement
+# Override the area constraint parameters to encourage larger kitchens
+sample_home_constraint_params.furniture_fullness_pct = 0.9
+sample_home_constraint_params.has_kitchen_barstools = True

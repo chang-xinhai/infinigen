@@ -33,24 +33,36 @@ from . import util as cu
 from .semantics import home_asset_usage
 
 
-def sample_home_constraint_params():
+@gin.configurable
+def sample_home_constraint_params(
+    furniture_fullness_pct=None,
+    obj_interior_obj_pct=None,
+    obj_on_storage_pct=None,
+    obj_on_nonstorage_pct=None,
+    painting_area_per_room_area=None,
+    has_tv=None,
+    has_aquarium_tank=None,
+    has_birthday_balloons=None,
+    has_cocktail_tables=None,
+    has_kitchen_barstools=None,
+):
     return dict(
         # what pct of the room floorplan should we try to fill with furniture?
-        furniture_fullness_pct=uniform(0.6, 0.9),
+        furniture_fullness_pct=furniture_fullness_pct if furniture_fullness_pct is not None else uniform(0.6, 0.9),
         # how many objects in each shelving per unit of volume
-        obj_interior_obj_pct=uniform(0.5, 1),  # uniform(0.6, 0.9),
+        obj_interior_obj_pct=obj_interior_obj_pct if obj_interior_obj_pct is not None else uniform(0.5, 1),  # uniform(0.6, 0.9),
         # what pct of top surface of storage furniture should be filled with objects? e.g pct of top surface of shelf
-        obj_on_storage_pct=uniform(0.5, 1.0),
+        obj_on_storage_pct=obj_on_storage_pct if obj_on_storage_pct is not None else uniform(0.5, 1.0),
         # what pct of top surface of NON-STORAGE objects should be filled with objects? e.g pct of countertop/diningtable covered in stuff
-        obj_on_nonstorage_pct=uniform(0.2, 1.0),
+        obj_on_nonstorage_pct=obj_on_nonstorage_pct if obj_on_nonstorage_pct is not None else uniform(0.2, 1.0),
         # meters squared of wall art per approx meters squared of FLOOR area. TODO cant measure wall area currently.
-        painting_area_per_room_area=uniform(40, 100) / 40,
+        painting_area_per_room_area=painting_area_per_room_area if painting_area_per_room_area is not None else uniform(40, 100) / 40,
         # rare objects wont even be added to the constraint graph in most homes
-        has_tv=uniform() < 0.5,
-        has_aquarium_tank=uniform() < 0.15,
-        has_birthday_balloons=uniform() < 0.15,
-        has_cocktail_tables=uniform() < 0.15,
-        has_kitchen_barstools=uniform() < 0.15,
+        has_tv=has_tv if has_tv is not None else uniform() < 0.5,
+        has_aquarium_tank=has_aquarium_tank if has_aquarium_tank is not None else uniform() < 0.15,
+        has_birthday_balloons=has_birthday_balloons if has_birthday_balloons is not None else uniform() < 0.15,
+        has_cocktail_tables=has_cocktail_tables if has_cocktail_tables is not None else uniform() < 0.15,
+        has_kitchen_barstools=has_kitchen_barstools if has_kitchen_barstools is not None else uniform() < 0.15,
     )
 
 
@@ -370,13 +382,16 @@ def home_room_constraints(has_fewer_rooms=False, kitchen_only=False):
     def pholder(r):
         return r.same_level()[Semantics.Staircase]
 
+    # Kitchen size preferences - larger for kitchen_only mode
+    kitchen_area_target = 50 if kitchen_only else 20  # Increase from 20 to 50 sqm for kitchen_only
+    
     room_term = (
         rooms[-Semantics.Utility][-Semantics.Bathroom][-Semantics.Closet]
         .sum(lambda r: (r.access_angle() - np.pi / 2).clip(0))
         .minimize(weight=5.0)
         + (
             rooms[Semantics.Kitchen].sum(
-                lambda r: (r.area() / 20).log().hinge(0, 0.4).pow(2)
+                lambda r: (r.area() / kitchen_area_target).log().hinge(0, 0.4).pow(2)
             )
             + rooms[Semantics.Bedroom].sum(
                 lambda r: (r.area() / 40).log().hinge(0, 0.4).pow(2)
@@ -501,7 +516,8 @@ def home_room_constraints(has_fewer_rooms=False, kitchen_only=False):
     )
 
 
-def home_furniture_constraints():
+@gin.configurable
+def home_furniture_constraints(kitchen_only=False):
     """Construct a constraint graph which incentivizes realistic home layouts.
 
     Result will contain both hard constraints (`constraints`) and soft constraints (`score_terms`).
@@ -928,14 +944,18 @@ def home_furniture_constraints():
             )
         )
 
+    # Adjust counter coverage for kitchen_only mode
+    counter_coverage_min = 0.3 if kitchen_only else 0.4
+    counter_coverage_max = 0.8 if kitchen_only else 0.6
+    
     score_terms["kitchen_counters"] = kitchens.mean(
         lambda r: (
-            # try to fill 40-60% of kitchen floorplan with countertops (additive with typical furniture incentive)
+            # try to fill 30-80% (kitchen_only) or 40-60% (normal) of kitchen floorplan with countertops
             (
                 countertops.related_to(r).volume(dims=2)
                 / r.volume(dims=2).clamp_min(1)  # avoid div by 0
             )
-            .hinge(0.4, 0.6)
+            .hinge(counter_coverage_min, counter_coverage_max)
             .minimize(weight=10)
             +
             # cluster countertops together
@@ -1005,17 +1025,17 @@ def home_furniture_constraints():
             kitchen_appliances_big[appliances.DishwasherFactory]
             .related_to(r)
             .count()
-            .in_range(0, 1)
+            .in_range(0, 2 if kitchen_only else 1)
             * kitchen_appliances_big[appliances.BeverageFridgeFactory]
             .related_to(r)
             .count()
-            .in_range(0, 1)
+            .in_range(0, 2 if kitchen_only else 1)
             * (
                 kitchen_appliances_big[appliances.OvenFactory].related_to(r).count()
-                == 1
+                >= (1 if kitchen_only else 1)  # Still require at least 1 oven
             )
             * (wallfurn[shelves.KitchenCabinetFactory].related_to(r).count() >= 0)
-            * (microwaves.related_to(wallcounter.related_to(r)).count().in_range(1, 1))
+            * (microwaves.related_to(wallcounter.related_to(r)).count().in_range(1, 2 if kitchen_only else 1))
         )
     )
 
