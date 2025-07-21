@@ -55,7 +55,8 @@ def sample_home_constraint_params():
 
 
 @gin.configurable
-def home_room_constraints(has_fewer_rooms=False):
+def home_room_constraints(has_fewer_rooms=False, kitchen_only=False):
+    print("[home_room_constraints] has_fewer_rooms:", has_fewer_rooms, "kitchen_only:", kitchen_only)
     constraints = OrderedDict()
     score_terms = OrderedDict()
 
@@ -260,6 +261,23 @@ def home_room_constraints(has_fewer_rooms=False):
                 .in_range(1, 1, mean=1.0)
             )
         )
+    elif kitchen_only:
+        # For kitchen-only: more flexible constraints that bias toward kitchen+entrance
+        # but allow some minimal other connections for solver flexibility
+        constraints["node_gen"] = (
+            rooms[Semantics.Root].all(
+                lambda r: rooms[Semantics.Kitchen]
+                .related_to(r, cl.Traverse())
+                .count()
+                .in_range(1, 1, mean=1.0)
+            )
+            * rooms[Semantics.Kitchen].all(
+                lambda r: rooms[Semantics.Entrance]
+                .related_to(r, cl.Traverse())
+                .count()
+                .in_range(1, 1, mean=1.0)
+            )
+        )
 
     # endregion
 
@@ -333,6 +351,12 @@ def home_room_constraints(has_fewer_rooms=False):
             * (rooms[Semantics.Kitchen].count() >= 1)
             * (rooms[Semantics.Bedroom].count() >= 1)
             * (rooms[Semantics.Bathroom].count() >= 1)
+        )
+    elif kitchen_only:
+        node_constraint = (
+            (rooms[Semantics.Entrance].count() >= 1)
+            * (rooms[Semantics.Kitchen].count() >= 1)
+            * (rooms[Semantics.StaircaseRoom].count() == 0)
         )
 
     constraints["node"] = node_constraint

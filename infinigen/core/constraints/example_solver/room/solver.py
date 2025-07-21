@@ -129,9 +129,19 @@ class FloorPlanMoves:
         return indices
 
     def swap_room(self, state, k):
-        j = np.random.choice(
-            [r.target_name for r in state[k].relations if r.value.length > 0]
-        )
+        # j = np.random.choice(
+        #     [r.target_name for r in state[k].relations if r.value.length > 0]
+        # )
+        
+        # TODO: Implement for kitchen-only mode
+        valid_targets = [r.target_name for r in state[k].relations if r.value.length > 0]
+        
+        # If no valid targets for swapping, skip this operation
+        if not valid_targets:
+            return set()
+            
+        j = np.random.choice(valid_targets)
+        
         state[k].polygon, state[j].polygon = state[j].polygon, state[k].polygon
         return {k, j}
 

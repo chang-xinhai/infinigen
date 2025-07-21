@@ -1,0 +1,21 @@
+# Kitchen-only configuration for Infinigen indoor scene generation
+# This config generates a single kitchen room with full object placement and optimization
+
+# Base settings from singleroom.gin
+BlueprintSolidifier.enable_open=False
+restrict_solving.solve_max_rooms=3
+
+# Base settings from fast_solve.gin
+FloorPlanSolver.n_divide_trials = 25
+FloorPlanSolver.iters_mult = 25
+solve_objects.addition_weight_scalar = 3.0
+compose_indoors.solve_steps_large = 100
+compose_indoors.solve_steps_medium = 40
+compose_indoors.solve_steps_small = 5
+
+# Use kitchen_only mode - this is our custom approach
+home_room_constraints.kitchen_only = True
+home_room_constraints.has_fewer_rooms = False
+
+# Disable terrain to avoid errors
+compose_indoors.terrain_enabled = False
