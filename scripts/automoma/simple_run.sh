@@ -1,0 +1,1 @@
+python -m infinigen_examples.generate_indoors --seed 42 --task coarse --output_folder outputs/kitchen_test --configs kitchen_only.gin

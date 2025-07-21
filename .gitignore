@@ -5,7 +5,7 @@ blender.tar.xz
 Blender.app
 build/
 
-infinigen/assets/static_assets/source
+# infinigen/assets/static_assets/source
 
 .nfs*
 
