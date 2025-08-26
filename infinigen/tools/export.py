@@ -8,17 +8,23 @@ import logging
 import math
 import shutil
 import subprocess
+import warnings
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import bpy
-import coacd
 import gin
 import numpy as np
 import trimesh
 
 from infinigen.core.util import blender as butil
+
+try:
+    import coacd
+except ImportError:
+    coacd = None
+    warnings.warn("coacd could not be imported. Some features may be unavailable.")
 
 FORMAT_CHOICES = ["fbx", "obj", "usdc", "usda", "stl", "ply"]
 BAKE_TYPES = {
@@ -429,7 +435,7 @@ def process_glass_materials(obj, export_usd):
 def bake_pass(obj, dest: Path, img_size, bake_type, export_usd, export_name=None):
     if export_name is None:
         img = bpy.data.images.new(f"{obj.name}_{bake_type}", img_size, img_size)
-        clean_name = (obj.name).replace(" ", "_").replace(".", "_")
+        clean_name = (obj.name).replace(" ", "_").replace(".", "_").replace("/", "_")
         file_path = dest / f"{clean_name}_{bake_type}.png"
     else:
         img = bpy.data.images.new(f"{export_name}_{bake_type}", img_size, img_size)
@@ -965,6 +971,9 @@ def export_sim_ready(
     """
     Exports both the visual and collision assets for a geometry.
     """
+    if not visual_only:
+        assert coacd is not None, "coacd is required to export simulation assets."
+
     asset_exports = defaultdict(list)
     export_name = name if name is not None else obj.name
 
@@ -1226,7 +1235,7 @@ def export_curr_scene(
             ):
                 continue
 
-            obj_name = obj.name.replace('/', '_')
+            obj_name = obj.name.replace("/", "_")
             export_subfolder = export_folder / obj_name
             export_subfolder.mkdir(exist_ok=True, parents=True)
             export_file = export_subfolder / f"{obj_name}.{format}"

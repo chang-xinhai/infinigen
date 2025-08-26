@@ -74,6 +74,9 @@ INFINIGEN_MINIMAL_INSTALL=True pip install -e .
 # Full install (Terrain & OpenGL-GT enabled, needed for Infinigen-Nature HelloWorld)
 pip install -e ".[terrain,vis]"
 
+# Installation for simulation assets
+pip install -e ".[sim]"
+
 # Developer install (includes pytest, ruff, other recommended dev tools)
 pip install -e ".[dev,terrain,vis]"
 pre-commit install
@@ -108,7 +111,7 @@ INFINIGEN_INSTALL_CUSTOMGT=True bash scripts/install/interactive_blender.sh
 
 Once complete, you can use the helper script `python -m infinigen.launch_blender` to launch a blender UI, which will find and execute the `blender` executable in your `infinigen/blender` or `infinigen/Blender.app` folder.
 
-:warning: If you installed Infinigen as a Blender-Python scriptand encounter encounter example commands of the form `python -m <MODULEPATH> <ARGUMENTS>` in our documentation, you should instead run `python -m infinigen.launch_blender -m <MODULEPATH> -- <ARGUMENTS>` to launch them using your standalone blender installation rather than the system python..
+:warning: If you installed Infinigen as a Blender-Python script and encounter encounter example commands of the form `python -m <MODULEPATH> <ARGUMENTS>` in our documentation, you should instead run `python -m infinigen.launch_blender -m <MODULEPATH> -- <ARGUMENTS>` to launch them using your standalone blender installation rather than the system python..
 
 ## Using Infinigen in a Docker Container
 
