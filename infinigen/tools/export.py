@@ -641,6 +641,7 @@ def remove_params(mat, node_tree):
 
 
 def process_interfering_params(obj):
+    paramDict = {}
     for slot in obj.material_slots:
         mat = slot.material
         if mat is None or not mat.use_nodes:
