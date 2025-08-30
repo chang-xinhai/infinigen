@@ -1,3 +1,8 @@
+# Specific files
+assets/
+!assets/code/partnet_mobility_utils/
+
+
 Python-*
 Python-*.tgz
 blender

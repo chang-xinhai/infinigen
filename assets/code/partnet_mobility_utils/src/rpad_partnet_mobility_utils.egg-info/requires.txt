@@ -1,0 +1,30 @@
+numpy
+rpad-core@ git+https://github.com/r-pad/core.git
+rpad-pybullet-libs@ git+https://github.com/r-pad/pybullet_libs.git
+scipy
+trimesh
+typer
+
+[build_docs]
+mkdocs-material
+mkdocstrings[python]
+
+[develop]
+pytest
+black>=23.0
+isort
+mypy>=1.0
+pylint
+autoflake
+pre-commit
+jupyterlab
+
+[notebooks]
+rpad-visualize-3d@ git+https://github.com/r-pad/visualize_3d
+
+[pybullet]
+wheel
+pybullet
+
+[sapien]
+sapien

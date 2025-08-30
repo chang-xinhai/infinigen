@@ -1,0 +1,26 @@
+Metadata-Version: 2.1
+Name: rpad-partnet-mobility-utils
+Version: 0.1.0
+Summary: Partnet-Mobility Utils
+Author-email: Ben Eisner <baeisner@andrew.cmu.edu>
+Requires-Python: >=3.6
+Description-Content-Type: text/markdown
+Provides-Extra: develop
+Provides-Extra: build_docs
+Provides-Extra: pybullet
+Provides-Extra: sapien
+Provides-Extra: notebooks
+
+SEE DOCUMENTATION HERE: [https://r-pad.github.io/partnet_mobility_utils/]
+
+# partnet_mobility_utils
+
+These are some convenient python utilities to wrap the PartNet-Mobility dataset released as part of [SAPIEN](https://sapien.ucsd.edu/).
+
+# Renderers
+
+## Pybullet
+
+## SAPIEN
+
+## Trimesh
