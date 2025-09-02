@@ -21,14 +21,14 @@ result, import_config = omni.kit.commands.execute("URDFCreateImportConfig")
 # Set defaults
 import_config.set_merge_fixed_joints(False)
 import_config.set_replace_cylinders_with_capsules(False)
-import_config.set_convex_decomp(False)   #!!
-import_config.set_fix_base(True)    #!!
+import_config.set_convex_decomp(False)  #!!
+import_config.set_fix_base(True)  #!!
 import_config.set_import_inertia_tensor(False)
 import_config.set_distance_scale(1.0)
 import_config.set_density(1000.0)  #!!
-import_config.set_default_drive_type(0) #!!
-import_config.set_default_drive_strength(10000)   #!!
-import_config.set_default_position_drive_damping(1000) #!!
+import_config.set_default_drive_type(0)  #!!
+import_config.set_default_drive_strength(10000)  #!!
+import_config.set_default_position_drive_damping(1000)  #!!
 import_config.set_self_collision(False)
 import_config.set_up_vector(0, 0, 1)
 import_config.set_make_default_prim(True)
@@ -37,17 +37,18 @@ import_config.set_create_physics_scene(True)
 import_config.set_collision_from_visuals(False)
 
 
-file_path = "/home/xinhai/Documents/cuakr-docker/scene/infinigen/assets/partnet_mobility/processed_data/Microwave/7167/mobility.urdf"
-dest_path = "/home/xinhai/Documents/cuakr-docker/scene/infinigen/assets/partnet_mobility/processed_data/Microwave/7167/mobility/mobility.usd"
+file_path = "/home/xinhai/Documents/cuakr-docker/scene/infinigen/assets/partnet_mobility/processed_data/Microwave/7221_test_2/mobility.urdf"
+dest_path = "/home/xinhai/Documents/cuakr-docker/scene/infinigen/assets/partnet_mobility/processed_data/Microwave/7221_test_2/mobility/mobility.usd"
 
 dest_dir = dest_path.split("/")[:-1]
 import os
+
 if not os.path.exists("/".join(dest_dir)):
     os.makedirs("/".join(dest_dir))
 
 _, _robot_model = omni.kit.commands.execute(
-                "URDFParseFile", urdf_path=file_path, import_config=import_config
-            )
+    "URDFParseFile", urdf_path=file_path, import_config=import_config
+)
 
 for joint in _robot_model.joints:
     _robot_model.joints[joint].dynamics.damping = 1000.0
@@ -55,10 +56,28 @@ for joint in _robot_model.joints:
     _robot_model.joints[joint].dynamics.friction = 0.0
     _robot_model.joints[joint].limit.effort = 100.0
 
-omni.kit.commands.execute(
-                "URDFImportRobot",
-                urdf_path=file_path,
-                urdf_robot=_robot_model,
-                import_config=import_config,
-                dest_path=dest_path,
-            )
+_, robot_prim_path = omni.kit.commands.execute(
+    "URDFImportRobot",
+    urdf_path=file_path,
+    urdf_robot=_robot_model,
+    import_config=import_config,
+    dest_path=dest_path,
+)
+
+# robot_prim_path = robot_prim_path.split("/")[-1]
+print(f"Robot imported at {robot_prim_path}")
+
+from omni.isaac.core import World
+from curobo.util.usd_helper import UsdHelper, set_prim_transform
+
+
+isaac_world = World()
+usd_help = UsdHelper()
+usd_help.load_stage(isaac_world.stage)
+
+pose = [0, 0, 0, 0, 0, 0, 1]
+
+set_prim_transform(
+    isaac_world.stage.GetPrimAtPath(robot_prim_path),
+    pose=pose,
+)

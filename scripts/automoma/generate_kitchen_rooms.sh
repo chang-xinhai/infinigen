@@ -1,180 +1,284 @@
 #!/bin/bash
 
 # =============================================================================
-# Simple Infinigen Kitchen Scene Generation Script
+# Kitchen Scene Generation Pipeline
 # 
-# This script generates kitchen scenes using kitchen_only.gin configuration
+# This script generates kitchen scenes with a clean 3-stage pipeline:
+# 1. Scene Generation  -> scene_X_seedY/scene/
+# 2. USD Export        -> scene_X_seedY/export/  
+# 3. Object Extraction -> scene_X_seedY/info/
+#
 # Features:
-# - Simple logging with timestamps
-# - Scene generation using working kitchen_only.gin
-# - USD export with OBJ fallback
-# - Clean file structure
+# - Clean modular pipeline design
+# - Direct output to final structure (no temp directories)
+# - Standalone pipeline functions
+# - Robust error handling and logging
+# - Continues processing even when individual scenes fail
 # =============================================================================
 
-set -e  # Exit on any error
+# Note: Removed 'set -e' to allow pipeline to continue when individual scenes fail
 
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
 
-# Basic settings
-readonly NUM_SCENES=5
-readonly SCENE_NAME="kitchen_0721"
-readonly TEXTURE_RESOLUTION=1024
-readonly START_SEED=0
+# Scene settings
+readonly NUM_SCENES=50
+readonly SCENE_NAME="kitchen_0902_1"
+readonly START_SEED=42
 
-# Directory structure
-readonly BASE_DIR="outputs"
+# Output structure
+readonly BASE_DIR="outputs/kitchen_test"
 readonly OUTPUT_DIR="${BASE_DIR}/${SCENE_NAME}"
 readonly LOG_DIR="${OUTPUT_DIR}/logs"
-readonly EXPORT_DIR="${OUTPUT_DIR}/exports"
-readonly SCENES_DIR="${OUTPUT_DIR}/scenes"
+
+# Export settings
+readonly TEXTURE_RESOLUTION=1024
 
 # =============================================================================
-# LOGGING UTILITIES
+# UTILITIES
 # =============================================================================
 
-# Initialize logging
-setup_logging() {
-    mkdir -p "$LOG_DIR" "$EXPORT_DIR" "$SCENES_DIR"
+log() {
+    echo "[$(date '+%H:%M:%S')] $1"
+    echo "[$(date '+%H:%M:%S')] $1" >> "$LOG_DIR/pipeline.log"
+}
+
+setup_workspace() {
+    mkdir -p "$LOG_DIR"
     
-    local main_log="$LOG_DIR/kitchen_generation.log"
-    
-    cat > "$main_log" << EOF
+    cat > "$LOG_DIR/pipeline.log" << EOF
 ===============================================================================
-Kitchen Generation Started: $(date)
+Kitchen Generation Pipeline Started: $(date)
 ===============================================================================
-Number of scenes: $NUM_SCENES
-Starting seed: $START_SEED
-Output directory: $OUTPUT_DIR
-Using kitchen_only.gin configuration
+Scenes: $NUM_SCENES
+Seeds: $START_SEED to $((START_SEED + NUM_SCENES - 1))
+Output: $OUTPUT_DIR
+Structure: scene_X_seedY/{scene,export,info}
 ===============================================================================
 
 EOF
     
-    echo "📁 Created directories:"
-    echo "   Scenes: $SCENES_DIR" 
-    echo "   Exports: $EXPORT_DIR"
-    echo "   Logs: $LOG_DIR"
-    echo ""
+    log "� Pipeline initialized"
+    log "📁 Output directory: $OUTPUT_DIR"
 }
 
-# Log message with timestamp
-log_msg() {
-    local message="[$(date '+%H:%M:%S')] $1"
-    echo "$message"
-    echo "$message" >> "$LOG_DIR/kitchen_generation.log"
+get_scene_dir() {
+    local scene_id=$1
+    local seed=$2
+    echo "$OUTPUT_DIR/scene_${scene_id}_seed_${seed}"
 }
 
 # =============================================================================
-# SCENE GENERATION
+# PIPELINE STAGE 1: SCENE GENERATION
 # =============================================================================
 
-# Generate a single kitchen scene
-generate_kitchen() {
+generate_scene() {
     local scene_id=$1
     local seed=$2
     
-    local scene_name="${SCENE_PREFIX}_${scene_id}_seed_${seed}"
-    local scene_output="$SCENES_DIR/$scene_name"
-    local export_output="$EXPORT_DIR/$scene_name"
+    local scene_dir=$(get_scene_dir $scene_id $seed)
+    local scene_output="$scene_dir/scene"
     
-    log_msg "🏠 Starting $scene_name"
+    log "🏠 [Stage 1] Generating scene_${scene_id}_seed_${seed}"
+    log " Logging to $LOG_DIR/generate_scene_${scene_id}_seed_${seed}.log"
+
+    # Create scene directory
+    mkdir -p "$scene_output"
     
-    # Generate scene
-    log_msg "   🔄 Generating scene..."
-    if python -m infinigen_examples.generate_indoors \
+    # Generate scene directly to final location (ignore exit code)
+    python -m infinigen_examples.generate_indoors \
         --seed "$seed" \
         --task coarse \
         --output_folder "$scene_output" \
         --configs kitchen_only.gin \
-        > "$LOG_DIR/generate_${scene_name}.log" 2>&1; then
-        
-        log_msg "   ✅ Scene generated successfully"
-        
-        # Export scene
-        log_msg "   🔄 Exporting scene..."
-        if export_scene "$scene_name" "$scene_output" "$export_output"; then
-            log_msg "   🎉 $scene_name completed successfully"
-            return 0
-        else
-            log_msg "   ❌ Export failed for $scene_name"
-            return 1
-        fi
+        > "$LOG_DIR/generate_scene_${scene_id}_seed_${seed}.log" 2>&1
+    
+    # Verify generation by checking output file
+    if [[ -f "$scene_output/scene.blend" && -s "$scene_output/scene.blend" ]]; then
+        log "✅ [Stage 1] Scene generated successfully - scene.blend file created"
+        return 0
     else
-        log_msg "   ❌ Scene generation failed for $scene_name"
-        log_msg "   📄 Check log: $LOG_DIR/generate_${scene_name}.log"
+        log "❌ [Stage 1] Scene generation failed - scene.blend file missing or empty"
         return 1
     fi
 }
 
-# Export scene to USD with OBJ fallback
+# =============================================================================
+# PIPELINE STAGE 2: USD EXPORT
+# =============================================================================
+
 export_scene() {
-    local scene_name=$1
-    local scene_folder=$2
-    local export_folder=$3
+    local scene_id=$1
+    local seed=$2
     
-    # Try USD export first
-    if python -m infinigen.tools.export \
-        --input_folder "$scene_folder" \
-        --output_folder "$export_folder" \
+    local scene_dir=$(get_scene_dir $scene_id $seed)
+    local scene_input="$scene_dir/scene"
+    local export_output="$scene_dir/export"
+    
+    log "💎 [Stage 2] Exporting scene_${scene_id}_seed_${seed} to USD"
+    log " Logging to $LOG_DIR/export_scene_${scene_id}_seed_${seed}.log"
+    
+    # Create export directory
+    mkdir -p "$export_output"
+    
+    # Export to USD (ignore exit code)
+    python -m infinigen.tools.export \
+        --input_folder "$scene_input" \
+        --output_folder "$export_output" \
         --format usdc \
         --resolution $TEXTURE_RESOLUTION \
-        > "$LOG_DIR/export_usd_${scene_name}.log" 2>&1; then
-        
-        log_msg "   💎 USD export completed"
+        > "$LOG_DIR/export_scene_${scene_id}_seed_${seed}.log" 2>&1
+    
+    # Verify export by checking for USD files
+    if find "$export_output" -name "*.usdc" -type f -size +0 | grep -q .; then
+        local usd_count=$(find "$export_output" -name "*.usdc" -type f -size +0 | wc -l)
+        log "✅ [Stage 2] USD export completed - found $usd_count USD file(s)"
         return 0
     else
-        log_msg "   ⚠️  USD export failed, trying OBJ..."
-        
-        # Fallback to OBJ
-        if python -m infinigen.tools.export \
-            --input_folder "$scene_folder" \
-            --output_folder "$export_folder" \
-            --format obj \
-            --resolution $TEXTURE_RESOLUTION \
-            > "$LOG_DIR/export_obj_${scene_name}.log" 2>&1; then
-            
-            log_msg "   📦 OBJ export completed"
-            return 0
-        else
-            log_msg "   💥 Both USD and OBJ exports failed"
-            return 1
-        fi
+        log "❌ [Stage 2] USD export failed - no valid .usdc files found"
+        return 1
     fi
 }
 
 # =============================================================================
-# BATCH PROCESSING
+# PIPELINE STAGE 3: OBJECT EXTRACTION
 # =============================================================================
 
-# Generate all kitchen scenes
-generate_all_kitchens() {
+extract_objects() {
+    local scene_id=$1
+    local seed=$2
+    
+    local scene_dir=$(get_scene_dir $scene_id $seed)
+    local blend_file="$scene_dir/scene/scene.blend"
+    local info_dir="$scene_dir/info"
+    local metadata_file="$info_dir/metadata.json"
+    
+    log "🔍 [Stage 3] Extracting objects from scene_${scene_id}_seed_${seed}"
+    log " Logging to $LOG_DIR/extract_scene_${scene_id}_seed_${seed}.log"
+
+    # Create info directory
+    mkdir -p "$info_dir"
+    
+    # Extract objects using the Python script (ignore exit code)
+    python "scripts/automoma/extract_object_info.py" \
+        --blend_file "$blend_file" \
+        --output "$metadata_file" \
+        > "$LOG_DIR/extract_scene_${scene_id}_seed_${seed}.log" 2>&1
+
+    # Verify extraction by checking metadata file
+    if [[ -f "$metadata_file" && -s "$metadata_file" ]]; then
+        # Additional check: verify it's valid JSON
+        if python -m json.tool "$metadata_file" > /dev/null 2>&1; then
+            log "✅ [Stage 3] Object extraction completed - valid metadata.json created"
+            return 0
+        else
+            log "❌ [Stage 3] Object extraction failed - metadata.json exists but is not valid JSON"
+            return 1
+        fi
+    else
+        log "❌ [Stage 3] Object extraction failed - metadata.json file missing or empty"
+        return 1
+    fi
+}
+
+# =============================================================================
+# PIPELINE ORCHESTRATION
+# =============================================================================
+
+process_scene() {
+    local scene_id=$1
+    local seed=$2
+    
+    log ""
+    log "🎬 Processing scene_${scene_id}_seed_${seed}"
+    log "----------------------------------------"
+    
+    # Wrap each stage in error handling to ensure pipeline continues
+    local stage1_success=false
+    local stage2_success=false
+    local stage3_success=false
+    
+    # Stage 1: Generate scene
+    if generate_scene $scene_id $seed; then
+        stage1_success=true
+    else
+        log "❌ Stage 1 (Generation) failed for scene_${scene_id}_seed_${seed}"
+    fi
+    
+    # Stage 2: Export scene (only if stage 1 succeeded)
+    if $stage1_success; then
+        if export_scene $scene_id $seed; then
+            stage2_success=true
+        else
+            log "❌ Stage 2 (Export) failed for scene_${scene_id}_seed_${seed}"
+        fi
+    else
+        log "⏭️  Skipping Stage 2 (Export) - Stage 1 failed"
+    fi
+    
+    # Stage 3: Extract objects (only if stage 1 succeeded)
+    if $stage1_success; then
+        if extract_objects $scene_id $seed; then
+            stage3_success=true
+        else
+            log "❌ Stage 3 (Extraction) failed for scene_${scene_id}_seed_${seed}"
+        fi
+    else
+        log "⏭️  Skipping Stage 3 (Extraction) - Stage 1 failed"
+    fi
+    
+    # Report final status
+    if $stage1_success && $stage2_success && $stage3_success; then
+        log "🎉 All stages completed successfully for scene_${scene_id}_seed_${seed}"
+        return 0
+    else
+        log "⚠️  Pipeline completed with some failures for scene_${scene_id}_seed_${seed}"
+        log "   Stage 1 (Generation): $([ "$stage1_success" = true ] && echo "✅" || echo "❌")"
+        log "   Stage 2 (Export): $([ "$stage2_success" = true ] && echo "✅" || echo "❌")"
+        log "   Stage 3 (Extraction): $([ "$stage3_success" = true ] && echo "✅" || echo "❌")"
+        return 1
+    fi
+}
+
+run_pipeline() {
     local successful=0
     local failed=0
     
-    log_msg "🚀 Starting batch generation of $NUM_SCENES kitchens"
-    log_msg ""
+    log "🚀 Starting kitchen generation pipeline"
+    log "Processing $NUM_SCENES scenes..."
     
     for i in $(seq 0 $((NUM_SCENES - 1))); do
         local seed=$((START_SEED + i))
         
-        if generate_kitchen "$i" "$seed"; then
+        # Process scene with error isolation - continue even if one fails
+        if process_scene $i $seed; then
             ((successful++))
+            log "✅ Scene $((i + 1))/$NUM_SCENES completed successfully"
         else
             ((failed++))
+            log "❌ Scene $((i + 1))/$NUM_SCENES failed - continuing with next scene"
         fi
         
-        log_msg ""
-        log_msg "📊 Progress: $((i + 1))/$NUM_SCENES (Success: $successful, Failed: $failed)"
-        log_msg ""
+        log ""
+        log "📊 Progress: $((i + 1))/$NUM_SCENES | Success: $successful | Failed: $failed"
+        
+        # Add a small delay to avoid overwhelming the system
+        sleep 1
     done
     
-    # Create summary
+    log ""
+    log "🏁 Pipeline finished processing all $NUM_SCENES scenes"
+    log "Final results: $successful successful, $failed failed"
+    
+    # Generate summary
     create_summary $successful $failed
 }
 
-# Create summary report
+# =============================================================================
+# SUMMARY GENERATION
+# =============================================================================
+
 create_summary() {
     local successful=$1
     local failed=$2
@@ -184,52 +288,60 @@ create_summary() {
     
     cat > "$summary_file" << EOF
 ===============================================================================
-Kitchen Generation Summary
+Kitchen Generation Pipeline Summary
 ===============================================================================
-Completed: $(date)
+Date: $(date)
 Total scenes: $total
 Successful: $successful
 Failed: $failed
 Success rate: $(( successful * 100 / total ))%
 
-Directory Structure:
-├── scenes/          # Generated Blender scenes
-├── exports/         # USD/OBJ exports  
-├── logs/           # Generation and export logs
-└── SUMMARY.txt     # This summary
+Output Structure:
+$OUTPUT_DIR/
+├── scene_0_seed_${START_SEED}/
+│   ├── scene/           # Blender files
+│   ├── export/          # USD files  
+│   └── info/            # Object metadata JSON
+├── scene_1_seed_$((START_SEED + 1))/
+│   └── ...
+└── logs/               # Pipeline logs
 
-Generated Scenes:
+Scene Status:
 EOF
 
     for i in $(seq 0 $((NUM_SCENES - 1))); do
         local seed=$((START_SEED + i))
-        local scene_name="${SCENE_PREFIX}_${i}_seed_${seed}"
-        local scene_file="$SCENES_DIR/$scene_name/scene.blend"
-        local export_dir="$EXPORT_DIR/$scene_name"
+        local scene_dir=$(get_scene_dir $i $seed)
+        local scene_name="scene_${i}_seed_${seed}"
         
-        if [ -f "$scene_file" ]; then
-            if [ -d "$export_dir" ] && [ "$(ls -A "$export_dir" 2>/dev/null)" ]; then
-                echo "✅ $scene_name - Scene + Export OK" >> "$summary_file"
-            else
-                echo "⚠️  $scene_name - Scene OK, Export Failed" >> "$summary_file"
-            fi
-        else
-            echo "❌ $scene_name - Generation Failed" >> "$summary_file"
-        fi
+        local scene_ok="❌"
+        local export_ok="❌"
+        local info_ok="❌"
+        
+        [[ -f "$scene_dir/scene/scene.blend" ]] && scene_ok="✅"
+        [[ -n "$(find "$scene_dir/export" -name "*.usdc" 2>/dev/null)" ]] && export_ok="✅"
+        [[ -f "$scene_dir/info/metadata.json" ]] && info_ok="✅"
+        
+        echo "$scene_name: Scene $scene_ok | Export $export_ok | Info $info_ok" >> "$summary_file"
     done
     
     cat >> "$summary_file" << EOF
 
-Usage:
-To view a scene: python -m infinigen.launch_blender $SCENES_DIR/kitchen_0_seed_0/scene.blend
-To find exports: ls $EXPORT_DIR/
-To check logs: ls $LOG_DIR/
+Quick Start:
+# View first scene
+python -m infinigen.launch_blender $OUTPUT_DIR/scene_0_seed_${START_SEED}/scene/scene.blend
 
-Generated with Simple Kitchen Generator
+# Check object metadata  
+cat $OUTPUT_DIR/scene_0_seed_${START_SEED}/info/metadata.json
+
+# Browse exports
+ls $OUTPUT_DIR/scene_0_seed_${START_SEED}/export/
+
+Generated by Kitchen Pipeline v2.0
 ===============================================================================
 EOF
     
-    log_msg "📋 Summary created: $summary_file"
+    log "📋 Summary created: $summary_file"
 }
 
 # =============================================================================
@@ -238,31 +350,35 @@ EOF
 
 main() {
     echo "==============================================================================="
-    echo "🏠 Simple Kitchen Generator"
+    echo "🏠 Kitchen Generation Pipeline"
     echo "==============================================================================="
-    echo "Generating $NUM_SCENES kitchen scenes using kitchen_only.gin"
-    echo "Starting seed: $START_SEED"
-    echo "Output directory: $OUTPUT_DIR"
+    echo "Scenes: $NUM_SCENES"
+    echo "Seeds: $START_SEED to $((START_SEED + NUM_SCENES - 1))"
+    echo "Output: $OUTPUT_DIR"
+    echo ""
+    echo "Pipeline: Generation → Export → Extraction"
+    echo "Structure: scene_X_seedY/{scene,export,info}"
+    echo "==============================================================================="
     echo ""
     
-    # Setup and run
-    setup_logging
-    generate_all_kitchens
+    # Initialize and run
+    setup_workspace
+    run_pipeline
     
     echo ""
     echo "==============================================================================="
-    echo "🎉 Generation Complete!"
+    echo "🎉 Pipeline Complete!"
     echo "==============================================================================="
-    echo "� Results: $OUTPUT_DIR"
-    echo "� Summary: $OUTPUT_DIR/SUMMARY.txt"
-    echo "� Logs: $LOG_DIR/"
+    echo "📁 Results: $OUTPUT_DIR"
+    echo "📋 Summary: $OUTPUT_DIR/SUMMARY.txt"
+    echo "📄 Logs: $LOG_DIR/"
     echo ""
-    echo "To view first scene:"
-    echo "python -m infinigen.launch_blender $SCENES_DIR/${SCENE_PREFIX}_0_seed_${START_SEED}/scene.blend"
+    echo "First scene:"
+    echo "  View: python -m infinigen.launch_blender $OUTPUT_DIR/scene_0_seed_${START_SEED}/scene/scene.blend"
+    echo "  Info: cat $OUTPUT_DIR/scene_0_seed_${START_SEED}/info/metadata.json"
     echo "==============================================================================="
 }
 
-# Run main function
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     main "$@"
 fi
