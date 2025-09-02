@@ -48,27 +48,62 @@ def sample_home_constraint_params(
 ):
     return dict(
         # what pct of the room floorplan should we try to fill with furniture?
-        furniture_fullness_pct=furniture_fullness_pct if furniture_fullness_pct is not None else uniform(0.6, 0.9),
+        furniture_fullness_pct=(
+            furniture_fullness_pct
+            if furniture_fullness_pct is not None
+            else uniform(0.6, 0.9)
+        ),
         # how many objects in each shelving per unit of volume
-        obj_interior_obj_pct=obj_interior_obj_pct if obj_interior_obj_pct is not None else uniform(0.5, 1),  # uniform(0.6, 0.9),
+        obj_interior_obj_pct=(
+            obj_interior_obj_pct
+            if obj_interior_obj_pct is not None
+            else uniform(0.5, 1)
+        ),  # uniform(0.6, 0.9),
         # what pct of top surface of storage furniture should be filled with objects? e.g pct of top surface of shelf
-        obj_on_storage_pct=obj_on_storage_pct if obj_on_storage_pct is not None else uniform(0.5, 1.0),
+        obj_on_storage_pct=(
+            obj_on_storage_pct if obj_on_storage_pct is not None else uniform(0.5, 1.0)
+        ),
         # what pct of top surface of NON-STORAGE objects should be filled with objects? e.g pct of countertop/diningtable covered in stuff
-        obj_on_nonstorage_pct=obj_on_nonstorage_pct if obj_on_nonstorage_pct is not None else uniform(0.2, 1.0),
+        obj_on_nonstorage_pct=(
+            obj_on_nonstorage_pct
+            if obj_on_nonstorage_pct is not None
+            else uniform(0.2, 1.0)
+        ),
         # meters squared of wall art per approx meters squared of FLOOR area. TODO cant measure wall area currently.
-        painting_area_per_room_area=painting_area_per_room_area if painting_area_per_room_area is not None else uniform(40, 100) / 40,
+        painting_area_per_room_area=(
+            painting_area_per_room_area
+            if painting_area_per_room_area is not None
+            else uniform(40, 100) / 40
+        ),
         # rare objects wont even be added to the constraint graph in most homes
         has_tv=has_tv if has_tv is not None else uniform() < 0.5,
-        has_aquarium_tank=has_aquarium_tank if has_aquarium_tank is not None else uniform() < 0.15,
-        has_birthday_balloons=has_birthday_balloons if has_birthday_balloons is not None else uniform() < 0.15,
-        has_cocktail_tables=has_cocktail_tables if has_cocktail_tables is not None else uniform() < 0.15,
-        has_kitchen_barstools=has_kitchen_barstools if has_kitchen_barstools is not None else uniform() < 0.15,
+        has_aquarium_tank=(
+            has_aquarium_tank if has_aquarium_tank is not None else uniform() < 0.15
+        ),
+        has_birthday_balloons=(
+            has_birthday_balloons
+            if has_birthday_balloons is not None
+            else uniform() < 0.15
+        ),
+        has_cocktail_tables=(
+            has_cocktail_tables if has_cocktail_tables is not None else uniform() < 0.15
+        ),
+        has_kitchen_barstools=(
+            has_kitchen_barstools
+            if has_kitchen_barstools is not None
+            else uniform() < 0.15
+        ),
     )
 
 
 @gin.configurable
 def home_room_constraints(has_fewer_rooms=False, kitchen_only=False):
-    print("[home_room_constraints] has_fewer_rooms:", has_fewer_rooms, "kitchen_only:", kitchen_only)
+    print(
+        "[home_room_constraints] has_fewer_rooms:",
+        has_fewer_rooms,
+        "kitchen_only:",
+        kitchen_only,
+    )
     constraints = OrderedDict()
     score_terms = OrderedDict()
 
@@ -276,19 +311,16 @@ def home_room_constraints(has_fewer_rooms=False, kitchen_only=False):
     elif kitchen_only:
         # For kitchen-only: more flexible constraints that bias toward kitchen+entrance
         # but allow some minimal other connections for solver flexibility
-        constraints["node_gen"] = (
-            rooms[Semantics.Root].all(
-                lambda r: rooms[Semantics.Kitchen]
-                .related_to(r, cl.Traverse())
-                .count()
-                .in_range(1, 1, mean=1.0)
-            )
-            * rooms[Semantics.Kitchen].all(
-                lambda r: rooms[Semantics.Entrance]
-                .related_to(r, cl.Traverse())
-                .count()
-                .in_range(1, 1, mean=1.0)
-            )
+        constraints["node_gen"] = rooms[Semantics.Root].all(
+            lambda r: rooms[Semantics.Kitchen]
+            .related_to(r, cl.Traverse())
+            .count()
+            .in_range(1, 1, mean=1.0)
+        ) * rooms[Semantics.Kitchen].all(
+            lambda r: rooms[Semantics.Entrance]
+            .related_to(r, cl.Traverse())
+            .count()
+            .in_range(1, 1, mean=1.0)
         )
 
     # endregion
@@ -383,8 +415,8 @@ def home_room_constraints(has_fewer_rooms=False, kitchen_only=False):
         return r.same_level()[Semantics.Staircase]
 
     # Kitchen size preferences - larger for kitchen_only mode
-    kitchen_area_target = 50 if kitchen_only else 20  # Increase from 20 to 50 sqm for kitchen_only
-    
+    kitchen_area_target = np.random.uniform(20, 40) if kitchen_only else 20
+
     room_term = (
         rooms[-Semantics.Utility][-Semantics.Bathroom][-Semantics.Closet]
         .sum(lambda r: (r.access_angle() - np.pi / 2).clip(0))
@@ -793,7 +825,8 @@ def home_furniture_constraints(kitchen_only=False):
     constraints["lighting"] = rooms.all(
         lambda r: (
             # dont put redundant lights close to eachother (including lamps, ceiling lights, etc)
-            cl.min_distance_internal(lights.related_to(r)) >= 1
+            cl.min_distance_internal(lights.related_to(r))
+            >= 1
         )
     )
 
@@ -947,7 +980,7 @@ def home_furniture_constraints(kitchen_only=False):
     # Adjust counter coverage for kitchen_only mode
     counter_coverage_min = 0.3 if kitchen_only else 0.4
     counter_coverage_max = 0.8 if kitchen_only else 0.6
-    
+
     score_terms["kitchen_counters"] = kitchens.mean(
         lambda r: (
             # try to fill 30-80% (kitchen_only) or 40-60% (normal) of kitchen floorplan with countertops
@@ -1015,27 +1048,35 @@ def home_furniture_constraints(kitchen_only=False):
     ).related_to(kitchens, cu.against_wall)
     microwaves = (
         # kitchen_appliances[appliances.MicrowaveFactory]
-        kitchen_appliances[static_assets.StaticMicrowaveFactory] # TODO
+        kitchen_appliances[static_assets.StaticMicrowaveFactory]  # TODO
         .related_to(wallcounter, cu.on)
         .related_to(wallcounter, cu.back_coplanar_back)
     )
 
     constraints["kitchen_appliance"] = kitchens.all(
         lambda r: (
-            kitchen_appliances_big[appliances.DishwasherFactory]
-            .related_to(r)
-            .count()
-            .in_range(0, 2 if kitchen_only else 1)
-            * kitchen_appliances_big[appliances.BeverageFridgeFactory]
-            .related_to(r)
-            .count()
-            .in_range(0, 2 if kitchen_only else 1)
+            (
+                kitchen_appliances_big[appliances.DishwasherFactory]
+                .related_to(r)
+                .count()
+                == (1 if kitchen_only else 0)
+            )
+            * (
+                kitchen_appliances_big[appliances.BeverageFridgeFactory]
+                .related_to(r)
+                .count()
+                == (1 if kitchen_only else 0)
+            )
             * (
                 kitchen_appliances_big[appliances.OvenFactory].related_to(r).count()
-                >= (1 if kitchen_only else 1)  # Still require at least 1 oven
+                == (1 if kitchen_only else 1)  # Still require at least 1 oven
             )
             * (wallfurn[shelves.KitchenCabinetFactory].related_to(r).count() >= 0)
-            * (microwaves.related_to(wallcounter.related_to(r)).count().in_range(1, 2 if kitchen_only else 1))
+            * (
+                microwaves.related_to(wallcounter.related_to(r))
+                .count()
+                == (1 if kitchen_only else 0)
+            )
         )
     )
 
@@ -1270,8 +1311,7 @@ def home_furniture_constraints(kitchen_only=False):
             * (
                 rugs.related_to(r)
                 # .related_to(furniture.related_to(r), cu.side_by_side)
-                .count()
-                .in_range(0, 2)
+                .count().in_range(0, 2)
             )
         )
     )
