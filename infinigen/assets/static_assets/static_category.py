@@ -131,9 +131,24 @@ def static_category_factory(
 # StaticShelfFactory = static_category_factory("Shelf", tag_support=True, z_dim=2)
 
 # PartNet-Mobility examples
-StaticMicrowaveFactory = static_category_factory("Microwave", scale=0.4)
-# StaticRefrigeratorFactory = static_category_factory("Refrigerator")
+# TODO: adjust the scale ranges based on the actual object sizes
+'''
+For ao-grasp objects:
+1. Microwave: scale [0.355 -- 0.433]
+2. Oven: scale [0.636 -- 0.760]
+3. StorageFurniture: scale [0.446 -- 0.579]
+4. TrashCan: scale [0.460 -- 0.547]
+5. Dishwasher: scale [0.532 -- 0.701]
+'''
+import numpy as np
+StaticMicrowaveFactory = static_category_factory("Microwave", scale=np.random.uniform(0.355, 0.433))
+StaticOvenFactory = static_category_factory("Oven", scale=np.random.uniform(0.636, 0.760))
+StaticStorageFurnitureFactory = static_category_factory("StorageFurniture", scale=np.random.uniform(0.446, 0.579), tag_support=True)
+StaticTrashCanFactory = static_category_factory("TrashCan", scale=np.random.uniform(0.460, 0.547))
+StaticDishwasherFactory = static_category_factory("Dishwasher", scale=np.random.uniform(0.532, 0.701))
 
+# Manually checked
+StaticRefrigeratorFactory = static_category_factory("Refrigerator", scale=np.random.uniform(0.8, 1.0))
 
 if __name__ == "__main__":
     print("[static_category] Defined static asset factories for categories: Microwave, Refrigerator")

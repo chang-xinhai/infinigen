@@ -164,7 +164,12 @@ def home_asset_usage():
         appliances.OvenFactory,
         appliances.BeverageFridgeFactory,
         appliances.MicrowaveFactory,
-        static_assets.StaticMicrowaveFactory,
+        static_assets.StaticMicrowaveFactory,  # TODO
+        static_assets.StaticDishwasherFactory,
+        static_assets.StaticOvenFactory,
+        static_assets.StaticStorageFurnitureFactory,
+        static_assets.StaticTrashCanFactory,
+        static_assets.StaticRefrigeratorFactory,
     }
 
     used_as[Semantics.KitchenCounter] = {

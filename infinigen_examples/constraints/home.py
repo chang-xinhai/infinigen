@@ -1046,29 +1046,35 @@ def home_furniture_constraints(kitchen_only=False):
     kitchen_appliances_big = kitchen_appliances.related_to(
         kitchens, cu.on_floor
     ).related_to(kitchens, cu.against_wall)
+    
     microwaves = (
         # kitchen_appliances[appliances.MicrowaveFactory]
         kitchen_appliances[static_assets.StaticMicrowaveFactory]  # TODO
         .related_to(wallcounter, cu.on)
-        .related_to(wallcounter, cu.back_coplanar_back)
+        .related_to(wallcounter, cu.back_coplanar_back_microwave)  # Not all microwaves are back-coplanar
+        # .related_to(wallcounter, cu.back_coplanar_back)  
     )
 
     constraints["kitchen_appliance"] = kitchens.all(
         lambda r: (
             (
-                kitchen_appliances_big[appliances.DishwasherFactory]
+                # kitchen_appliances_big[appliances.DishwasherFactory]
+                kitchen_appliances_big[static_assets.StaticDishwasherFactory]  # TODO
                 .related_to(r)
                 .count()
                 == (1 if kitchen_only else 0)
             )
             * (
-                kitchen_appliances_big[appliances.BeverageFridgeFactory]
+                # kitchen_appliances_big[appliances.BeverageFridgeFactory]
+                kitchen_appliances_big[static_assets.StaticRefrigeratorFactory]  # TODO
                 .related_to(r)
                 .count()
                 == (1 if kitchen_only else 0)
             )
             * (
-                kitchen_appliances_big[appliances.OvenFactory].related_to(r).count()
+                # kitchen_appliances_big[appliances.OvenFactory]
+                kitchen_appliances_big[static_assets.StaticOvenFactory]  # TODO
+                .related_to(r).count()
                 == (1 if kitchen_only else 1)  # Still require at least 1 oven
             )
             * (wallfurn[shelves.KitchenCabinetFactory].related_to(r).count() >= 0)

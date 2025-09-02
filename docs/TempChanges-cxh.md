@@ -19,10 +19,10 @@
 # Key fix in solver.py
 def swap_room(self, state, k):
     valid_targets = [r.target_name for r in state[k].relations if r.value.length > 0]
-    
+  
     if not valid_targets:  # Prevent crash
         return set()
-        
+      
     j = np.random.choice(valid_targets)
     state[k].polygon, state[j].polygon = state[j].polygon, state[k].polygon
     return {k, j}
@@ -34,7 +34,7 @@ def swap_room(self, state, k):
 
 ```bash
 python -m infinigen_examples.generate_indoors --seed 42 --task coarse \
-  --output_folder outputs/kitchen_test/0721_1 --configs kitchen_only.gin
+  --output_folder outputs/kitchen_test/0827_1 --configs kitchen_only.gin
 ```
 
 **Batch Generation:**
@@ -46,7 +46,7 @@ bash scripts/automoma/generate_kitchen_rooms.sh
 ### Status
 
 - ✅ Single generation works
-- ✅ Kitchen-only constraints produce larger, more complex kitchens  
+- ✅ Kitchen-only constraints produce larger, more complex kitchens
 - ⚠️ Batch script needs testing
 
 ---

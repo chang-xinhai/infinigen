@@ -1,7 +1,6 @@
 # Specific files
-assets/
 !assets/code/partnet_mobility_utils/
-
+assets/
 
 Python-*
 Python-*.tgz
@@ -52,7 +51,7 @@ Blender-FLIP-Fluids
 *.npz
 *.out
 profiles_*.npz
-outputs
+output
 outputs_scratch
 snippets
 resources

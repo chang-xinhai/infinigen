@@ -6,10 +6,30 @@
 # CONFIGURATION: Edit this section to specify which steps to run
 # ============================================================================
 
-# Specify which steps to run (step1, step2, step3, step4)
+# Specify which steps to run (step1, step2, step3, step4, step5)
 # Example configurations:
+# running_steps=(step1 step2 step3)           # Run data processing only
+# running_steps=(step4)                       # Run URDF to USD conversion only  
+# running_steps=(step5)                       # Run URDF to GLB conversion only
+# running_steps=(step1 step2 step3 step4 step5) # Run all steps
+# running_steps=(step3 step4 step5)           # Skip validation, run reorganize and conversions
 
-running_steps=(step4)
+running_steps=(step5)
+
+# URDF to USD conversion configuration (only used if step4 is in running_steps)
+# Modes: "all", "random", "category", "object"
+usd_conversion_mode="all"
+usd_random_count=5                           # For random mode
+usd_category_name="Microwave"                # For category mode  
+usd_object_id="7167"                         # For object mode
+
+# URDF to GLB conversion configuration (only used if step5 is in running_steps)
+# Modes: "all", "random", "category", "object"
+glb_conversion_mode="all"
+glb_random_count=3                           # For random mode
+glb_category_name="Microwave"                # For category mode  
+glb_object_id="7167"                         # For object mode
+glb_scale=1.0                                # Scale factor for GLB conversion
 
 # ============================================================================
 # END CONFIGURATION
@@ -17,6 +37,23 @@ running_steps=(step4)
 
 echo "=== PartNet Mobility Data Processing Pipeline ==="
 echo "Configured to run steps: ${running_steps[*]}"
+if [[ " ${running_steps[*]} " =~ " step4 " ]]; then
+    echo "USD conversion mode: $usd_conversion_mode"
+    case $usd_conversion_mode in
+        "random") echo "Random objects count: $usd_random_count" ;;
+        "category") echo "Target category: $usd_category_name" ;;
+        "object") echo "Target object ID: $usd_object_id" ;;
+    esac
+fi
+if [[ " ${running_steps[*]} " =~ " step5 " ]]; then
+    echo "GLB conversion mode: $glb_conversion_mode"
+    case $glb_conversion_mode in
+        "random") echo "Random objects count: $glb_random_count" ;;
+        "category") echo "Target category: $glb_category_name" ;;
+        "object") echo "Target object ID: $glb_object_id" ;;
+    esac
+    echo "GLB scale factor: $glb_scale"
+fi
 echo ""
 
 # Activate conda environment
@@ -50,7 +87,7 @@ run_step3() {
     echo "Step 3: Reorganizing data to processed_data directory..."
     conda run --live-stream --name sapien python scripts/reorganize_data.py \
         "$RAW_DATA_DIR" \
-        "$VALID_OUTPUT_DIR/all_ids.txt" \
+        "$VALID_OUTPUT_DIR/all_ids.txt" \  # all_ids.txt or well_formed.txt
         "$CATEGORY_OUTPUT_DIR" \
         "$PROCESSED_DATA_DIR"
 }
@@ -61,22 +98,6 @@ run_step4() {
 
     # Using Isaac Sim 4.2.0
     conda activate cuakr-docker
-
-    # URDF to USD conversion configuration (only used if step4 is in running_steps)
-    # Modes: "all", "random", "category", "object"
-    usd_conversion_mode="all"
-    usd_random_count=5                           # For random mode
-    usd_category_name="Microwave"                # For category mode  
-    usd_object_id="7167"                         # For object mode
-
-    if [[ " ${running_steps[*]} " =~ " step4 " ]]; then
-        echo "USD conversion mode: $usd_conversion_mode"
-        case $usd_conversion_mode in
-            "random") echo "Random objects count: $usd_random_count" ;;
-            "category") echo "Target category: $usd_category_name" ;;
-            "object") echo "Target object ID: $usd_object_id" ;;
-        esac
-    fi
 
     echo "Conversion mode: $usd_conversion_mode"
     
@@ -99,6 +120,54 @@ run_step4() {
             ;;
         *)
             echo "Invalid conversion mode: $usd_conversion_mode. Skipping URDF to USD conversion."
+            return 1
+            ;;
+    esac
+}
+
+# Function to run step 5
+run_step5() {
+    echo "Step 5: Converting URDF to GLB..."
+
+    # Using scene_synthesizer environment
+    conda activate scene
+
+    echo "GLB conversion mode: $glb_conversion_mode"
+    
+    case $glb_conversion_mode in
+        "all")
+            echo "Converting all objects to GLB..."
+            conda run --live-stream --name scene python scripts/batch_urdf_to_glb.py \
+                --processed_data_dir "$PROCESSED_DATA_DIR" \
+                --mode all \
+                --scale "$glb_scale"
+            ;;
+        "random")
+            echo "Converting $glb_random_count random objects to GLB..."
+            conda run --live-stream --name scene python scripts/batch_urdf_to_glb.py \
+                --processed_data_dir "$PROCESSED_DATA_DIR" \
+                --mode random \
+                --count "$glb_random_count" \
+                --scale "$glb_scale"
+            ;;
+        "category")
+            echo "Converting category '$glb_category_name' to GLB..."
+            conda run --live-stream --name scene python scripts/batch_urdf_to_glb.py \
+                --processed_data_dir "$PROCESSED_DATA_DIR" \
+                --mode category \
+                --category "$glb_category_name" \
+                --scale "$glb_scale"
+            ;;
+        "object")
+            echo "Converting object '$glb_object_id' to GLB..."
+            conda run --live-stream --name scene python scripts/batch_urdf_to_glb.py \
+                --processed_data_dir "$PROCESSED_DATA_DIR" \
+                --mode object \
+                --object-id "$glb_object_id" \
+                --scale "$glb_scale"
+            ;;
+        *)
+            echo "Invalid conversion mode: $glb_conversion_mode. Skipping URDF to GLB conversion."
             return 1
             ;;
     esac
@@ -143,6 +212,27 @@ with open('$PROCESSED_DATA_DIR/usd_conversion_stats.json', 'r') as f:
         print(f'Category list: {sorted(categories_processed)}')
 "
     fi
+
+    # Display GLB conversion stats if available
+    if [ -f "$PROCESSED_DATA_DIR/glb_conversion_stats.json" ]; then
+        echo ""
+        echo "=== GLB Conversion Statistics ==="
+        python3 -c "
+import json
+with open('$PROCESSED_DATA_DIR/glb_conversion_stats.json', 'r') as f:
+    stats = json.load(f)
+    print(f'Total GLB conversions attempted: {stats.get(\"total_attempted\", 0)}')
+    print(f'Total GLB conversions successful: {stats.get(\"total_successful\", 0)}')
+    print(f'Total GLB conversions failed: {stats.get(\"total_failed\", 0)}')
+    if stats.get('total_attempted', 0) > 0:
+        success_rate = stats.get('total_successful', 0) / stats.get('total_attempted', 1) * 100
+        print(f'GLB conversion success rate: {success_rate:.1f}%')
+    categories_processed = stats.get('categories_processed', [])
+    if categories_processed:
+        print(f'Categories with GLB files: {len(categories_processed)}')
+        print(f'Category list: {sorted(categories_processed)}')
+"
+    fi
 }
 
 # Execute based on configured steps
@@ -162,6 +252,9 @@ for step in "${running_steps[@]}"; do
         "step4")
             run_step4
             ;;
+        "step5")
+            run_step5
+            ;;
         *)
             echo "Warning: Unknown step '$step'. Skipping."
             ;;
@@ -169,4 +262,4 @@ for step in "${running_steps[@]}"; do
 done
 
 echo "=== Pipeline Completed ==="
-display_stats
+# display_stats

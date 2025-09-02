@@ -23,12 +23,12 @@
 # =============================================================================
 
 # Scene settings
-readonly NUM_SCENES=50
-readonly SCENE_NAME="kitchen_0902_1"
-readonly START_SEED=42
+readonly NUM_SCENES=10
+readonly SCENE_NAME="kitchen_0902_2"
+readonly START_SEED=0
 
 # Output structure
-readonly BASE_DIR="outputs/kitchen_test"
+readonly BASE_DIR="output/kitchen_test"
 readonly OUTPUT_DIR="${BASE_DIR}/${SCENE_NAME}"
 readonly LOG_DIR="${OUTPUT_DIR}/logs"
 

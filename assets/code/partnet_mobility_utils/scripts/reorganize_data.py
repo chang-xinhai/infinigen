@@ -3,7 +3,7 @@
 PartNet Mobility Dataset Reorganization Script
 
 This script reorganizes well-formed objects by category into the processed_data directory.
-Only objects that exist in both category files and well_formed.txt will be copied.
+Only objects that exist in both category files and filter.txt will be copied.
 """
 
 import shutil
@@ -13,17 +13,19 @@ from typing import Set, Dict
 import typer
 
 
-def load_well_formed_ids(well_formed_file: Path) -> Set[str]:
+def load_filter_ids(filter_file: Path) -> Set[str]:
     """Load set of well-formed object IDs"""
-    well_formed_ids = set()
-    if well_formed_file.exists():
-        with open(well_formed_file, 'r') as f:
+    filter_ids = set()
+    if filter_file.exists():
+        with open(filter_file, 'r') as f:
             for line in f:
                 line = line.strip()
                 if line and ',' in line:
                     obj_id = line.split(',')[0]
-                    well_formed_ids.add(obj_id)
-    return well_formed_ids
+                    filter_ids.add(obj_id)
+                elif line.isdigit():
+                    filter_ids.add(line)
+    return filter_ids
 
 
 def load_category_files(category_dir: Path) -> Dict[str, Set[str]]:
@@ -49,7 +51,7 @@ def load_category_files(category_dir: Path) -> Dict[str, Set[str]]:
 
 def main(
     raw_data_dir: Path = typer.Argument(..., help="Raw data directory path"),
-    well_formed_file: Path = typer.Argument(..., help="well_formed.txt file path"),
+    filter_file: Path = typer.Argument(..., help="filter.txt file path"),
     category_dir: Path = typer.Argument(..., help="Category files directory path"),
     output_dir: Path = typer.Argument(..., help="Output processed_data directory path")
 ):
@@ -58,7 +60,7 @@ def main(
     
     Args:
         raw_data_dir: Directory containing raw data (e.g., .../partnet_mobility/raw_data)
-        well_formed_file: Path to well_formed.txt file
+        filter_file: Path to filter.txt file
         category_dir: Directory containing category files (e.g., .../output/category)
         output_dir: Output directory (e.g., .../partnet_mobility/processed_data)
     """
@@ -68,8 +70,8 @@ def main(
         print(f"Error: Raw data directory does not exist: {raw_data_dir}")
         return
     
-    if not well_formed_file.exists():
-        print(f"Error: well_formed.txt file does not exist: {well_formed_file}")
+    if not filter_file.exists():
+        print(f"Error: filter.txt file does not exist: {filter_file}")
         return
         
     if not category_dir.exists():
@@ -81,8 +83,8 @@ def main(
     
     # Load well-formed object IDs
     print("Loading well-formed object IDs...")
-    well_formed_ids = load_well_formed_ids(well_formed_file)
-    print(f"Found {len(well_formed_ids)} well-formed objects")
+    filter_ids = load_filter_ids(filter_file)
+    print(f"Found {len(filter_ids)} well-formed objects")
     
     # Load category files
     print("Loading category files...")
@@ -90,7 +92,7 @@ def main(
     
     # Statistics for JSON output
     stats = {
-        "total_well_formed_objects": len(well_formed_ids),
+        "total_filter_objects": len(filter_ids),
         "total_categories": len(categories),
         "categories": {}
     }
@@ -101,7 +103,7 @@ def main(
         print(f"\nProcessing category: {category_name}")
         
         # Find objects that are both in category and well-formed
-        valid_ids = category_ids.intersection(well_formed_ids)
+        valid_ids = category_ids.intersection(filter_ids)
         print(f"  Found {len(valid_ids)} valid objects")
         
         if not valid_ids:
