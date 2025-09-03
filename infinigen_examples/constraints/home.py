@@ -1051,8 +1051,8 @@ def home_furniture_constraints(kitchen_only=False):
         # kitchen_appliances[appliances.MicrowaveFactory]
         kitchen_appliances[static_assets.StaticMicrowaveFactory]  # TODO
         .related_to(wallcounter, cu.on)
-        .related_to(wallcounter, cu.back_coplanar_back_microwave)  # Not all microwaves are back-coplanar
-        # .related_to(wallcounter, cu.back_coplanar_back)  
+        .related_to(wallcounter, cu.back_coplanar_back)  
+        # .related_to(wallcounter, cu.back_coplanar_back_microwave)  # Not all microwaves are back-coplanar
     )
 
     constraints["kitchen_appliance"] = kitchens.all(

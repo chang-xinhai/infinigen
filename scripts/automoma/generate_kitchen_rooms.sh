@@ -23,8 +23,8 @@
 # =============================================================================
 
 # Scene settings
-readonly NUM_SCENES=10
-readonly SCENE_NAME="kitchen_0902_2"
+readonly NUM_SCENES=1
+readonly SCENE_NAME="kitchen_0902_4"
 readonly START_SEED=0
 
 # Output structure
