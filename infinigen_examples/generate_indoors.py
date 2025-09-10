@@ -4,7 +4,10 @@
 
 import argparse
 import logging
+import time
 from pathlib import Path
+from typing import Dict, List, Tuple
+import json
 
 # ruff: noqa: E402
 # NOTE: logging config has to be before imports that use logging
@@ -62,6 +65,225 @@ from . import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Global variable for time recording
+TIME_RECORD = False
+
+
+class TimeRecorder:
+    """Records execution time for each stage of the indoor generation pipeline."""
+    
+    def __init__(self, enabled: bool = False):
+        self.enabled = enabled
+        self.times: Dict[str, float] = {}
+        self.stage_order: List[str] = []
+        self.current_stage = None
+        self.stage_start_time = None
+        print(f"TimeRecorder enabled: {self.enabled}")
+        
+    def start_stage(self, stage_name: str):
+        """Start timing a new stage."""
+        if not self.enabled:
+            return
+            
+        # End previous stage if it exists
+        if self.current_stage is not None:
+            self.end_stage()
+            
+        self.current_stage = stage_name
+        self.stage_start_time = time.time()
+        if stage_name not in self.stage_order:
+            self.stage_order.append(stage_name)
+        logger.info(f"[TIME_RECORD] Starting stage: {stage_name}")
+        
+    def end_stage(self):
+        """End timing the current stage."""
+        if not self.enabled or self.current_stage is None:
+            return
+            
+        elapsed = time.time() - self.stage_start_time
+        if self.current_stage in self.times:
+            self.times[self.current_stage] += elapsed
+        else:
+            self.times[self.current_stage] = elapsed
+            
+        logger.info(f"[TIME_RECORD] Completed stage: {self.current_stage} ({elapsed:.2f}s)")
+        self.current_stage = None
+        self.stage_start_time = None
+        
+    def get_timing_report(self) -> Dict:
+        """Get a comprehensive timing report."""
+        if self.current_stage is not None:
+            self.end_stage()
+            
+        total_time = sum(self.times.values())
+        
+        # Create ordered timing data
+        timing_data = []
+        for stage in self.stage_order:
+            if stage in self.times:
+                duration = self.times[stage]
+                percentage = (duration / total_time * 100) if total_time > 0 else 0
+                timing_data.append({
+                    'stage': stage,
+                    'duration_seconds': duration,
+                    'percentage': percentage
+                })
+        
+        return {
+            'total_time_seconds': total_time,
+            'stage_timings': timing_data,
+            'stage_count': len(self.times)
+        }
+        
+    def save_timing_report(self, output_folder: Path):
+        """Save timing report to files and create visualization."""
+        if not self.enabled:
+            return
+            
+        report = self.get_timing_report()
+        
+        # Save JSON report
+        json_path = output_folder / "timing_report.json"
+        with open(json_path, 'w') as f:
+            json.dump(report, f, indent=2)
+        logger.info(f"Timing report saved to: {json_path}")
+        
+        # Create and save visualization
+        self._create_timing_chart(output_folder, report)
+        
+        # Print summary to console
+        self._print_timing_summary(report)
+        
+    def _create_timing_chart(self, output_folder: Path, report: Dict):
+        """Create a visual chart of timing data."""
+        try:
+            import matplotlib.pyplot as plt
+            import matplotlib.patches as patches
+            
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8))
+            
+            # Bar chart
+            stages = [item['stage'] for item in report['stage_timings']]
+            durations = [item['duration_seconds'] for item in report['stage_timings']]
+            percentages = [item['percentage'] for item in report['stage_timings']]
+            
+            # Create color map
+            colors = plt.cm.Set3(range(len(stages)))
+            
+            bars = ax1.bar(range(len(stages)), durations, color=colors)
+            ax1.set_xlabel('Pipeline Stages')
+            ax1.set_ylabel('Duration (seconds)')
+            ax1.set_title('Indoor Generation Pipeline - Stage Execution Times')
+            ax1.set_xticks(range(len(stages)))
+            ax1.set_xticklabels(stages, rotation=45, ha='right')
+            
+            # Add value labels on bars
+            for bar, duration in zip(bars, durations):
+                height = bar.get_height()
+                ax1.text(bar.get_x() + bar.get_width()/2., height + height*0.01,
+                        f'{duration:.1f}s', ha='center', va='bottom', fontsize=8)
+            
+            # Pie chart
+            ax2.pie(durations, labels=stages, colors=colors, autopct='%1.1f%%', startangle=90)
+            ax2.set_title('Time Distribution Across Stages')
+            
+            plt.tight_layout()
+            
+            # Save chart
+            chart_path = output_folder / "timing_chart.png"
+            plt.savefig(chart_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            logger.info(f"Timing chart saved to: {chart_path}")
+            
+            # Create detailed breakdown chart
+            self._create_detailed_chart(output_folder, report)
+            
+        except ImportError:
+            logger.warning("matplotlib not available. Skipping chart creation.")
+            logger.info("Install matplotlib for timing visualizations: pip install matplotlib")
+            
+    def _create_detailed_chart(self, output_folder: Path, report: Dict):
+        """Create a detailed Gantt-style timing chart."""
+        try:
+            import matplotlib.pyplot as plt
+            
+            fig, ax = plt.subplots(figsize=(14, max(8, len(report['stage_timings']) * 0.5)))
+            
+            stages = [item['stage'] for item in report['stage_timings']]
+            durations = [item['duration_seconds'] for item in report['stage_timings']]
+            
+            # Create horizontal bar chart
+            y_pos = range(len(stages))
+            colors = plt.cm.viridis([d/max(durations) if durations else 0.5 for d in durations])
+            
+            bars = ax.barh(y_pos, durations, color=colors)
+            
+            # Customize chart
+            ax.set_yticks(y_pos)
+            ax.set_yticklabels(stages)
+            ax.set_xlabel('Duration (seconds)')
+            ax.set_title('Indoor Generation Pipeline - Detailed Stage Breakdown')
+            ax.grid(axis='x', alpha=0.3)
+            
+            # Add duration labels
+            for i, (bar, duration, percentage) in enumerate(zip(bars, durations, [item['percentage'] for item in report['stage_timings']])):
+                width = bar.get_width()
+                ax.text(width + max(durations)*0.01, bar.get_y() + bar.get_height()/2,
+                       f'{duration:.1f}s ({percentage:.1f}%)', 
+                       ha='left', va='center', fontsize=9)
+            
+            # Add total time annotation
+            ax.text(0.02, 0.98, f"Total Time: {report['total_time_seconds']:.1f} seconds", 
+                   transform=ax.transAxes, fontsize=12, fontweight='bold',
+                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+            
+            plt.tight_layout()
+            
+            detailed_chart_path = output_folder / "timing_detailed_chart.png"
+            plt.savefig(detailed_chart_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            logger.info(f"Detailed timing chart saved to: {detailed_chart_path}")
+            
+        except ImportError:
+            pass  # Already logged warning in _create_timing_chart
+            
+    def _print_timing_summary(self, report: Dict):
+        """Print a formatted timing summary to console."""
+        print("\n" + "="*80)
+        print("INDOOR GENERATION PIPELINE - TIMING REPORT")
+        print("="*80)
+        print(f"Total Execution Time: {report['total_time_seconds']:.2f} seconds")
+        print(f"Number of Stages: {report['stage_count']}")
+        print("\nStage Breakdown:")
+        print("-"*80)
+        print(f"{'Stage':<30} {'Duration (s)':<15} {'Percentage':<12} {'Bar'}")
+        print("-"*80)
+        
+        max_duration = max([item['duration_seconds'] for item in report['stage_timings']], default=1)
+        
+        for item in report['stage_timings']:
+            stage = item['stage']
+            duration = item['duration_seconds']
+            percentage = item['percentage']
+            
+            # Create simple ASCII bar
+            bar_length = int((duration / max_duration) * 30)
+            bar = "█" * bar_length + "░" * (30 - bar_length)
+            
+            print(f"{stage:<30} {duration:<15.2f} {percentage:<12.1f}% {bar}")
+        
+        print("="*80)
+        
+        # Identify bottlenecks
+        sorted_stages = sorted(report['stage_timings'], key=lambda x: x['duration_seconds'], reverse=True)
+        print("\nTop 5 Time-Consuming Stages:")
+        print("-"*50)
+        for i, item in enumerate(sorted_stages[:5], 1):
+            print(f"{i}. {item['stage']}: {item['duration_seconds']:.2f}s ({item['percentage']:.1f}%)")
+        print("="*80 + "\n")
 
 
 def default_greedy_stages():
@@ -134,9 +356,27 @@ all_vars = [cu.variable_room, cu.variable_obj]
 
 @gin.configurable
 def compose_indoors(output_folder: Path, scene_seed: int, **overrides):
+    global TIME_RECORD
+    
     p = pipeline.RandomStageExecutor(scene_seed, output_folder, overrides)
+    
+    print("Overrides:")
+    for k, v in overrides.items():
+        print(f"{k}: {v}")
+    
+    # Initialize time recorder using global variable
+    time_recorder = TimeRecorder(enabled=TIME_RECORD)
 
     logger.debug(overrides)
+    
+    def timed_run_stage(stage_name: str, func, *args, **kwargs):
+        """Wrapper to add timing to pipeline stages."""
+        time_recorder.start_stage(stage_name)
+        try:
+            result = p.run_stage(stage_name, func, *args, **kwargs)
+            return result
+        finally:
+            time_recorder.end_stage()
 
     def add_coarse_terrain():
         terrain = Terrain(
@@ -148,11 +388,11 @@ def compose_indoors(output_folder: Path, scene_seed: int, **overrides):
         # placement.density.set_tag_dict(terrain.tag_dict)
         return terrain, terrain_mesh
 
-    terrain, terrain_mesh = p.run_stage(
+    terrain, terrain_mesh = timed_run_stage(
         "terrain", add_coarse_terrain, use_chance=False, default=(None, None)
     )
 
-    p.run_stage("sky_lighting", lighting.sky_lighting.add_lighting, use_chance=False)
+    timed_run_stage("sky_lighting", lighting.sky_lighting.add_lighting, use_chance=False)
 
     consgraph = home_constraints.home_furniture_constraints()
     consgraph_rooms = home_constraints.home_room_constraints()
@@ -186,7 +426,7 @@ def compose_indoors(output_folder: Path, scene_seed: int, **overrides):
     def solve_rooms():
         return solver.solve_rooms(scene_seed, consgraph_rooms, stages["rooms"])
 
-    state: state_def.State = p.run_stage("solve_rooms", solve_rooms, use_chance=False)
+    state: state_def.State = timed_run_stage("solve_rooms", solve_rooms, use_chance=False)
 
     def solve_stage_name(stage_name: str, group: str, **kwargs):
         assigments = greedy.iterate_assignments(
@@ -207,7 +447,7 @@ def compose_indoors(output_folder: Path, scene_seed: int, **overrides):
         solve_stage_name("on_floor_and_wall", "large")
         solve_stage_name("on_floor_freestanding", "large")
 
-    p.run_stage("solve_large", solve_large, use_chance=False, default=state)
+    timed_run_stage("solve_large", solve_large, use_chance=False, default=state)
 
     solved_rooms = [
         state.objs[assignment[cu.variable_room]].obj
@@ -260,7 +500,7 @@ def compose_indoors(output_folder: Path, scene_seed: int, **overrides):
 
         return poses, scene_preprocessed
 
-    poses, scene_preprocessed = p.run_stage(
+    poses, scene_preprocessed = timed_run_stage(
         "pose_cameras", pose_cameras, use_chance=False, default=(None, None)
     )
 
@@ -276,11 +516,11 @@ def compose_indoors(output_folder: Path, scene_seed: int, **overrides):
         animated_cams = [cam for cam in camera_rigs if cam.animation_data is not None]
         save_imu_tum_files(frames_folder / "imu_tum", animated_cams)
 
-    p.run_stage(
+    timed_run_stage(
         "animate_cameras", animate_cameras, use_chance=False, prereq="pose_cameras"
     )
 
-    p.run_stage(
+    timed_run_stage(
         "populate_intermediate_pholders",
         populate.populate_state_placeholders,
         solver.state,
@@ -294,17 +534,17 @@ def compose_indoors(output_folder: Path, scene_seed: int, **overrides):
         solve_stage_name("on_ceiling", "medium")
         solve_stage_name("side_obj", "medium")
 
-    p.run_stage("solve_medium", solve_medium, use_chance=False, default=state)
+    timed_run_stage("solve_medium", solve_medium, use_chance=False, default=state)
 
     def solve_small():
         solve_stage_name("obj_ontop_obj", "small", addition_weight_scalar=3)
         solve_stage_name("obj_on_support", "small", restrict_moves=["addition"])
 
-    p.run_stage("solve_small", solve_small, use_chance=False, default=state)
+    timed_run_stage("solve_small", solve_small, use_chance=False, default=state)
 
     solver.optim.save_stats(output_folder / "optim_records.csv")
 
-    p.run_stage(
+    timed_run_stage(
         "populate_assets", populate.populate_state_placeholders, state, use_chance=False
     )
 
@@ -332,18 +572,18 @@ def compose_indoors(output_folder: Path, scene_seed: int, **overrides):
             collision_existing=overrides.get("enable_collision_solved", False),
         )
 
-    p.run_stage("floating_objs", place_floating, use_chance=False, default=state)
+    timed_run_stage("floating_objs", place_floating, use_chance=False, default=state)
 
     door_filter = r.Domain({t.Semantics.Door}, [(cl.AnyRelation(), stages["rooms"])])
     window_filter = r.Domain(
         {t.Semantics.Window}, [(cl.AnyRelation(), stages["rooms"])]
     )
-    p.run_stage(
+    timed_run_stage(
         "room_doors",
         lambda: room_dec.populate_doors(solver.get_bpy_objects(door_filter), constants),
         use_chance=False,
     )
-    p.run_stage(
+    timed_run_stage(
         "room_windows",
         lambda: room_dec.populate_windows(
             solver.get_bpy_objects(window_filter), constants, state
@@ -352,16 +592,16 @@ def compose_indoors(output_folder: Path, scene_seed: int, **overrides):
     )
 
     room_meshes = solver.get_bpy_objects(r.Domain({t.Semantics.Room}))
-    p.run_stage(
+    timed_run_stage(
         "room_stairs",
         lambda: room_dec.room_stairs(constants, state, room_meshes),
         use_chance=False,
     )
-    p.run_stage(
+    timed_run_stage(
         "skirting_floor",
         lambda: make_skirting_board(constants, room_meshes, t.Subpart.SupportSurface),
     )
-    p.run_stage(
+    timed_run_stage(
         "skirting_ceiling",
         lambda: make_skirting_board(constants, room_meshes, t.Subpart.Ceiling),
     )
@@ -382,27 +622,27 @@ def compose_indoors(output_folder: Path, scene_seed: int, **overrides):
 
     rooms_split = room_dec.split_rooms(list(rooms_meshed.objects))
 
-    p.run_stage(
+    timed_run_stage(
         "room_pillars",
         room_dec.room_pillars,
         rooms_split["wall"].objects,
         constants,
     )
 
-    p.run_stage(
+    timed_run_stage(
         "room_walls",
         room_dec.room_walls,
         rooms_split["wall"].objects,
         constants,
         use_chance=False,
     )
-    p.run_stage(
+    timed_run_stage(
         "room_floors",
         room_dec.room_floors,
         rooms_split["floor"].objects,
         use_chance=False,
     )
-    p.run_stage(
+    timed_run_stage(
         "room_ceilings",
         room_dec.room_ceilings,
         rooms_split["ceiling"].objects,
@@ -418,7 +658,7 @@ def compose_indoors(output_folder: Path, scene_seed: int, **overrides):
                 print(f"Deleting {o.name}")
                 butil.delete(o)
 
-    p.run_stage("lights_off", turn_off_lights)
+    timed_run_stage("lights_off", turn_off_lights)
 
     def invisible_room_ceilings():
         invisible_to_camera = InvisibleToCamera()
@@ -429,9 +669,9 @@ def compose_indoors(output_folder: Path, scene_seed: int, **overrides):
             [o for o in bpy.data.objects if "CeilingLight" in o.name]
         )
 
-    p.run_stage("invisible_room_ceilings", invisible_room_ceilings, use_chance=False)
+    timed_run_stage("invisible_room_ceilings", invisible_room_ceilings, use_chance=False)
 
-    p.run_stage(
+    timed_run_stage(
         "overhead_cam",
         place_cam_overhead,
         cam=camera_rigs[0],
@@ -439,7 +679,7 @@ def compose_indoors(output_folder: Path, scene_seed: int, **overrides):
         use_chance=False,
     )
 
-    p.run_stage(
+    timed_run_stage(
         "hide_other_rooms",
         hide_other_rooms,
         state,
@@ -448,7 +688,7 @@ def compose_indoors(output_folder: Path, scene_seed: int, **overrides):
         use_chance=False,
     )
 
-    height = p.run_stage(
+    height = timed_run_stage(
         "nature_backdrop",
         create_outdoor_backdrop,
         terrain,
@@ -505,6 +745,11 @@ def compose_indoors(output_folder: Path, scene_seed: int, **overrides):
                 break
 
     p.save_results(output_folder / "pipeline_coarse.csv")
+    print("Saving coarse results")
+    
+    # Generate and save timing report if time recording is enabled
+    time_recorder.save_timing_report(output_folder)
+    print("Timing report generation complete.")
 
     return {
         "height_offset": height,
@@ -513,7 +758,16 @@ def compose_indoors(output_folder: Path, scene_seed: int, **overrides):
 
 
 def main(args):
+    global TIME_RECORD
+    
     scene_seed = init.apply_scene_seed(args.seed)
+    
+    # Set global time recording flag
+    TIME_RECORD = args.time_record
+    
+    if TIME_RECORD:
+        logger.info("Time recording enabled. Detailed timing reports will be generated.")
+    
     init.apply_gin_configs(
         configs=["base_indoors.gin"] + args.configs,
         overrides=args.overrides,
@@ -574,6 +828,12 @@ if __name__ == "__main__":
     )
     parser.add_argument("--task_uniqname", type=str, default=None)
     parser.add_argument("-d", "--debug", type=str, nargs="*", default=None)
+    parser.add_argument(
+        "--time_record", 
+        action="store_true",
+        help="Enable detailed time recording for each pipeline stage. "
+             "Creates timing reports and visualizations in the output folder."
+    )
 
     args = init.parse_args_blender(parser)
 
