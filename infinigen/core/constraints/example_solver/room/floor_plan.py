@@ -139,7 +139,9 @@ class FloorPlanSolver:
                     break
 
         state = self.simulated_anneal(state)
-        self.contour_factory.decorate(state)
+        
+        # TODO: remove the decoration step for rect rooms generation
+        # self.contour_factory.decorate(state)
 
         obj_states = {}
         for j in range(self.n_stories):
@@ -148,6 +150,18 @@ class FloorPlanSolver:
                     State({k: v for k, v in state.objs.items() if room_level(k) == j})
                 )
             obj_states.update(st.objs)
+        
+        # Print layout shape and each room shape
+        print(f"Floor plan layout dimensions: {self.widths[0]} x {self.heights[0]}")
+        print("Room shapes:")
+        for k, v in state.objs.items():
+            if hasattr(v, 'polygon') and v.polygon is not None:
+                bounds = v.polygon.bounds
+                convex_hull = v.polygon.convex_hull
+                area = v.polygon.area
+                print(f"  {k}: area={area}")
+                print(f"    convex_hull={convex_hull}")
+        
         unique_roomtypes = set()
         for graph in self.graphs:
             for s in graph.names:
