@@ -311,16 +311,18 @@ def home_room_constraints(has_fewer_rooms=False, kitchen_only=False):
     elif kitchen_only:
         # For kitchen-only: more flexible constraints that bias toward kitchen+entrance
         # but allow some minimal other connections for solver flexibility
-        constraints["node_gen"] = rooms[Semantics.Root].all(
-            lambda r: rooms[Semantics.Kitchen]
-            .related_to(r, cl.Traverse())
-            .count()
-            .in_range(1, 1, mean=1.0)
-        ) * rooms[Semantics.Kitchen].all(
-            lambda r: rooms[Semantics.Entrance]
-            .related_to(r, cl.Traverse())
-            .count()
-            .in_range(1, 1, mean=1.0)
+        constraints["node_gen"] = (
+            rooms[Semantics.Root].all(
+                lambda r: rooms[Semantics.Kitchen]
+                .related_to(r, cl.Traverse())
+                .count()
+                .in_range(1, 1, mean=1.0)
+            ) * rooms[Semantics.Kitchen].all(
+                lambda r: rooms[Semantics.Entrance]
+                .related_to(r, cl.Traverse())
+                .count()
+                .in_range(1, 1, mean=1.0)
+            )
         )
 
     # endregion
@@ -540,6 +542,21 @@ def home_room_constraints(has_fewer_rooms=False, kitchen_only=False):
         .sum(lambda r: r.area() / pholder(r).area() - r.intersection(pholder(r)))
         .minimize(weight=5.0)
     )
+
+    # Add strong rectangular constraints for kitchen in kitchen_only mode [Useless?]
+    if kitchen_only:
+        room_term = room_term + (
+            # Strongly penalize non-rectangular kitchen shapes
+            rooms[Semantics.Kitchen]
+            .sum(lambda r: (r.n_verts() - 4).abs())
+            .minimize(weight=100000.0)
+            + rooms[Semantics.Kitchen]
+            .sum(lambda r: r.convexity().log())
+            .minimize(weight=5000.0)
+            + rooms[Semantics.Kitchen]
+            .sum(lambda r: (r.n_verts() - 4).pow(2))
+            .minimize(weight=5000.0)
+        )
 
     score_terms["room"] = room_term
 
@@ -1049,10 +1066,9 @@ def home_furniture_constraints(kitchen_only=False):
     
     microwaves = (
         # kitchen_appliances[appliances.MicrowaveFactory]
-        kitchen_appliances[static_assets.StaticMicrowaveFactory]  # TODO
+        kitchen_appliances[static_assets.StaticMicrowaveFactory] # TODO
         .related_to(wallcounter, cu.on)
-        .related_to(wallcounter, cu.back_coplanar_back)  
-        # .related_to(wallcounter, cu.back_coplanar_back_microwave)  # Not all microwaves are back-coplanar
+        .related_to(wallcounter, cu.back_coplanar_back)
     )
 
     constraints["kitchen_appliance"] = kitchens.all(
@@ -1074,14 +1090,14 @@ def home_furniture_constraints(kitchen_only=False):
             * (
                 # kitchen_appliances_big[appliances.OvenFactory]
                 kitchen_appliances_big[static_assets.StaticOvenFactory]  # TODO
-                .related_to(r).count()
+                .related_to(r)
+                .count()
                 == (1 if kitchen_only else 1)  # Still require at least 1 oven
             )
             * (wallfurn[shelves.KitchenCabinetFactory].related_to(r).count() >= 0)
             * (
-                microwaves.related_to(wallcounter.related_to(r))
-                .count()
-                == (1 if kitchen_only else 0)
+                microwaves.related_to(wallcounter.related_to(r)).count()
+                == (1 if kitchen_only else 1)
             )
         )
     )
