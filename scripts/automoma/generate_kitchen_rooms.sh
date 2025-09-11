@@ -23,8 +23,8 @@
 # =============================================================================
 
 # Scene settings
-readonly NUM_SCENES=5
-readonly SCENE_NAME="kitchen_0911_9_test_smaller_steps"
+readonly NUM_SCENES=1000
+readonly SCENE_NAME="kitchen_0911"
 readonly START_SEED=0
 
 # Output structure
