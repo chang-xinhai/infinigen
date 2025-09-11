@@ -222,7 +222,7 @@ class KitchenSpaceFactory(AssetFactory):
     def create_placeholder(self, **kwargs) -> bpy.types.Object:
         x, y, z = self.dimensions
         box = new_bbox(
-            -x / 2 * 1.08, x / 2 * 1.08, 0, y, 0, self.cabinet_bottom_height + 0.13
+            -x / 2 * 1.08, x / 2 * 1.08, 0, y, 0, self.cabinet_bottom_height + 0.01   # TODO: change the delta height from default 0.13 to 0.01
         )
         surface.add_geomod(box, nodegroup_tag_cube, apply=True)
 

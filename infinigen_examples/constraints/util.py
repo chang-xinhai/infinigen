@@ -74,7 +74,7 @@ back_coplanar_back = cl.CoPlanar(back, back, margin=0.05, rev_normal=True)
 
 back_coplanar_back_microwave = cl.CoPlanar(back, back, margin=0.20, rev_normal=True)
 
-microwave_on = cl.StableAgainst(bottom, {t.Subpart.SupportSurface})
+microwave_on = cl.StableAgainst(bottom, {t.Subpart.SupportSurface}, margin=0.0)
 microwave_front = cl.CoPlanar(front, front, margin=0.10, rev_normal=True)
 
 ontop = cl.StableAgainst(bottom, top)
