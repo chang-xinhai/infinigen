@@ -23,8 +23,8 @@
 # =============================================================================
 
 # Scene settings
-readonly NUM_SCENES=1
-readonly SCENE_NAME="kitchen_0902_4"
+readonly NUM_SCENES=5
+readonly SCENE_NAME="kitchen_0911_9_test_smaller_steps"
 readonly START_SEED=0
 
 # Output structure
@@ -90,6 +90,7 @@ generate_scene() {
     python -m infinigen_examples.generate_indoors \
         --seed "$seed" \
         --task coarse \
+        --time_record \
         --output_folder "$scene_output" \
         --configs kitchen_only.gin \
         > "$LOG_DIR/generate_scene_${scene_id}_seed_${seed}.log" 2>&1

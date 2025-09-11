@@ -12,6 +12,23 @@
 ### Files Modified
 
 1. **`infinigen_examples/configs_indoor/kitchen_only.gin`** - New config file
+   ```
+   # simple
+   compose_indoors.solve_steps_large = 40
+   compose_indoors.solve_steps_medium = 20
+   compose_indoors.solve_steps_small = 2
+
+   # default
+   compose_indoors.solve_steps_large = 100
+   compose_indoors.solve_steps_medium = 40
+   compose_indoors.solve_steps_small = 5
+
+   # complex
+   compose_indoors.solve_steps_large = 200
+   compose_indoors.solve_steps_medium = 100
+   compose_indoors.solve_steps_small = 30
+
+   ```
 2. **`infinigen_examples/constraints/home.py`** - Added `kitchen_only` mode support
 3. **`infinigen/core/constraints/example_solver/room/solver.py`** - Fixed crash bug
 
@@ -22,7 +39,7 @@ def swap_room(self, state, k):
   
     if not valid_targets:  # Prevent crash
         return set()
-      
+    
     j = np.random.choice(valid_targets)
     state[k].polygon, state[j].polygon = state[j].polygon, state[k].polygon
     return {k, j}
