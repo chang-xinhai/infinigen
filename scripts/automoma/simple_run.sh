@@ -1,16 +1,25 @@
-data_folder="outputs/kitchen_test/0902_1"
+# Activate conda environment
+data_folder="output/kitchen_test"
 scene_folder="$data_folder/scene"
 export_folder="$data_folder/export"
 TEXTURE_RESOLUTION=1024
 
-python -m infinigen_examples.generate_indoors --seed 42 --task coarse \
-  --output_folder "$scene_folder" --configs kitchen_only.gin
+log_folder="$data_folder/log"
+mkdir -p "$log_folder"
+
+python -m infinigen_examples.generate_indoors \
+        --seed "$seed" \
+        --task coarse \
+        --time_record \
+        --output_folder "$scene_output" \
+        --configs kitchen_only.gin \
+        >> "$log_folder/generate_scene_$seed.log" 2>&1
 
 python -m infinigen.tools.export \
         --input_folder "$scene_folder" \
         --output_folder "$export_folder" \
         --format usdc \
         --resolution $TEXTURE_RESOLUTION \
-        --omniverse
+        --omniverse \
+        >> "$log_folder/export_scene_$seed.log" 2>&1
 
-# /home/xinhai/Documents/cuakr-docker/scene/infinigen/assets/partnet_mobility/processed_data/Microwave/7263/mobility/mobility.usd
