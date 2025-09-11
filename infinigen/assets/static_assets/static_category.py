@@ -11,9 +11,7 @@ import json
 import bpy
 
 import sys
-sys.path.append("/home/xinhai/Documents/automoma/third_party/infinigen")
-
-from automoma.utils.config import abs_path
+# sys.path.append("/home/xinhai/Documents/automoma/third_party/infinigen")
 
 from infinigen.assets.static_assets.base import StaticAssetFactory
 from infinigen.core.tagging import tag_support_surfaces
