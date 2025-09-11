@@ -48,6 +48,7 @@ dependencies = [
     # used by trimesh, we could specify "trimesh[easy]" but this brings more packages
     "python-fcl",
     "rtree",
+    "pyyaml",
 ]
 
 [project.optional-dependencies]
