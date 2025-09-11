@@ -217,6 +217,7 @@ class KitchenSpaceFactory(AssetFactory):
     def sample_parameters(self, dimensions):
         self.cabinet_bottom_height = uniform(0.8, 1.0)
         self.cabinet_top_height = uniform(0.8, 1.0)
+        self.middle_space_height = uniform(0.3, 0.5)
 
     def create_placeholder(self, **kwargs) -> bpy.types.Object:
         x, y, z = self.dimensions
@@ -263,11 +264,11 @@ class KitchenSpaceFactory(AssetFactory):
             cabinet_top_left = cabinet_top_factory(i=0)
             cabinet_top_right = cabinet_top_factory(i=1)
 
-            cabinet_top_left.location = (-x / 4.0, 0.0, z - cabinet_top_height)
+            cabinet_top_left.location = (-x / 4.0, 0.0, z - cabinet_top_height + self.middle_space_height)
             cabinet_top_right.location = (
                 -x / 4.0,
                 y - cabinet_top_width,
-                z - cabinet_top_height,
+                z - cabinet_top_height + self.middle_space_height,
             )
 
             # hood / cab
@@ -280,7 +281,7 @@ class KitchenSpaceFactory(AssetFactory):
                     dimensions=(x * 0.66, top_mid_width + 0.15, cabinet_top_height),
                 )
                 top_mid = range_hood_factory(i=0)
-                top_mid.location = (-x * 0.5, y / 2.0, z - cabinet_top_height + 0.05)
+                top_mid.location = (-x * 0.5, y / 2.0, z - cabinet_top_height + 0.05 + self.middle_space_height)
 
             elif mid_style == "cabinet":
                 cabinet_top_mid_factory = KitchenCabinetFactory(
@@ -292,7 +293,7 @@ class KitchenSpaceFactory(AssetFactory):
                 top_mid.location = (
                     -x / 6.0,
                     y / 2.0 - top_mid_width / 2.0,
-                    z - (cabinet_top_height * 0.8),
+                    z - (cabinet_top_height * 0.8) + self.middle_space_height,
                 )
 
             else:

@@ -417,7 +417,7 @@ def home_room_constraints(has_fewer_rooms=False, kitchen_only=False):
         return r.same_level()[Semantics.Staircase]
 
     # Kitchen size preferences - larger for kitchen_only mode
-    kitchen_area_target = np.random.uniform(20, 40) if kitchen_only else 20
+    kitchen_area_target = np.random.uniform(35, 60) if kitchen_only else 20
 
     room_term = (
         rooms[-Semantics.Utility][-Semantics.Bathroom][-Semantics.Closet]
@@ -995,8 +995,8 @@ def home_furniture_constraints(kitchen_only=False):
         )
 
     # Adjust counter coverage for kitchen_only mode
-    counter_coverage_min = 0.3 if kitchen_only else 0.4
-    counter_coverage_max = 0.8 if kitchen_only else 0.6
+    counter_coverage_min = 0.1 if kitchen_only else 0.4
+    counter_coverage_max = 0.4 if kitchen_only else 0.6
 
     score_terms["kitchen_counters"] = kitchens.mean(
         lambda r: (
@@ -1096,8 +1096,7 @@ def home_furniture_constraints(kitchen_only=False):
             )
             * (wallfurn[shelves.KitchenCabinetFactory].related_to(r).count() >= 0)
             * (
-                microwaves.related_to(wallcounter.related_to(r)).count()
-                == (1 if kitchen_only else 1)
+                microwaves.related_to(wallcounter.related_to(r)).count().in_range(1, 1)
             )
         )
     )
