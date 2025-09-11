@@ -87,6 +87,9 @@ class FloorPlanSolver:
                     )
                     width, height = graph_maker.suggest_dimensions(graph, *args)
                     if width is not None and height is not None:
+                        # TODO: adjust the room sizes
+                        scale = 1.0
+                        width, height = width * scale, height * scale
                         break
                 else:
                     raise Exception("Invalid graph")
