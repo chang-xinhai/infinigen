@@ -70,8 +70,8 @@ dev = [
     "pytest-cov",
     "pytest-xdist",
     "pytest-timeout",
-    "pytype",
-    "ruff",
+    "ruff<0.9.0",
+    "ty",
     "isort",
     "tabulate",
     "rapidfuzz",
@@ -168,6 +168,7 @@ select = [
 ignore = [
     "E501", # over-length lines, formatter should handle it
     "E741", # ambigous variable name
+    "F841", # local variable is assigned to but never used
 ]
 
 [tool.ruff.lint.per-file-ignores]
