@@ -6,7 +6,9 @@
 
 import logging
 import os
+import time
 from contextlib import nullcontext
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -62,6 +64,7 @@ class RandomStageExecutor:
         **kwargs,
     ):
         mem_usage = psutil.Process(os.getpid()).memory_info().rss
+        started_at = datetime.now().isoformat(timespec="seconds")
 
         will_run = self._should_run_stage(name, use_chance, prereq)
 
@@ -70,6 +73,9 @@ class RandomStageExecutor:
                 {
                     "name": name,
                     "ran": will_run,
+                    "started_at": started_at,
+                    "finished_at": started_at,
+                    "duration_sec": 0.0,
                     "mem_at_finish": mem_usage,
                     "obj_count": count_objects(),
                     "instance_count": count_instance(),
@@ -85,13 +91,19 @@ class RandomStageExecutor:
         logger.debug(f"run_stage({name=}) using {seed=}")
 
         with FixedSeed(seed):
+            start_time = time.perf_counter()
             with Timer(name), gc_context:
                 ret = fn(*args, **kwargs)
+                finished_at = datetime.now().isoformat(timespec="seconds")
+                duration_sec = time.perf_counter() - start_time
                 mem_usage = psutil.Process(os.getpid()).memory_info().rss
                 self.results.append(
                     {
                         "name": name,
                         "ran": will_run,
+                        "started_at": started_at,
+                        "finished_at": finished_at,
+                        "duration_sec": duration_sec,
                         "mem_at_finish": mem_usage,
                         "obj_count": count_objects(),
                         "instance_count": count_instance(),
