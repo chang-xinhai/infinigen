@@ -21,6 +21,7 @@ import infinigen.assets.scatters
 from infinigen.core import init
 from infinigen.core.placement import camera as cam_util
 from infinigen.core.rendering.render import render_image
+from infinigen.core.rendering.structured_light import render_structured_light
 from infinigen.core.rendering.resample import resample_scene
 from infinigen.core.tagging import tag_system
 from infinigen.core.util import blender as butil
@@ -314,6 +315,7 @@ def execute_tasks(
         or Task.GroundTruth in task
         or Task.MeshSave in task
         or Task.Export in task
+        or Task.StructuredLight in task
     ):
         terrain = Terrain(
             scene_seed,
@@ -330,6 +332,13 @@ def execute_tasks(
             camera=active_camera,
             resample_idx=resample_idx,
         )
+
+    if Task.StructuredLight in task:
+        with Timer("Structured Light Rendering"):
+            render_structured_light(
+                frames_folder=Path(output_folder),
+                camera=active_camera,
+            )
 
     if Task.Export in task:
         export_scene(input_folder / output_blend_name, output_folder)

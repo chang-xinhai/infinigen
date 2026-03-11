@@ -1,0 +1,37 @@
+# ─────────────────────────────────────────────────────────────
+# Structured Light configuration for Infinigen Indoors
+# ─────────────────────────────────────────────────────────────
+# Usage:
+#   python -m infinigen.launch_blender infinigen_examples/generate_indoors.py -- \
+#     --input_folder outputs/my_scene/coarse \
+#     --output_folder outputs/my_scene/structured_light \
+#     -t structured_light \
+#     -g base_indoors.gin structured_light.gin \
+#     -s <seed>
+
+# ── SL Camera Rig Parameters ──────────────────────────────────
+# These match typical structured light sensor specs (e.g. Intel RealSense D415/D435)
+
+render_structured_light.sl_baseline = 0.055           # metres between L and R IR cameras
+render_structured_light.sl_cam_fov_deg = 69.4         # horizontal FOV of IR cameras
+render_structured_light.sl_cam_sensor_width = 6.328   # mm
+render_structured_light.sl_cam_sensor_height = 4.746  # mm
+render_structured_light.sl_proj_fov_delta_deg = 5.0   # projector FOV = cam FOV + delta
+render_structured_light.sl_proj_dlp_size = 6.328      # mm, projector DLP chip diagonal
+render_structured_light.sl_proj_energy = 30.0         # Blender spotlight energy (watts)
+
+# ── Resolution ────────────────────────────────────────────────
+render_structured_light.sl_resolution_x = 1280
+render_structured_light.sl_resolution_y = 720
+render_structured_light.sl_pattern_resolution_x = 1280
+render_structured_light.sl_pattern_resolution_y = 720
+
+# ── Pattern directory ─────────────────────────────────────────
+# Set to None to auto-detect from .idea/deepsl-data/data/patterns/
+# Or override with an absolute path to your own pattern folder.
+render_structured_light.sl_pattern_dir = None
+render_structured_light.sl_pattern_white = 'white.png'
+
+# ── Render quality ────────────────────────────────────────────
+render_structured_light.sl_max_samples = 64
+render_structured_light.sl_exr_depth = 16

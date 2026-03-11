@@ -554,6 +554,7 @@ if __name__ == "__main__":
             "render",
             "mesh_save",
             "export",
+            "structured_light",
         ],
     )
     parser.add_argument(

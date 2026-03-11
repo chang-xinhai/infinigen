@@ -12,6 +12,7 @@ class Task:
     GroundTruth = "ground_truth"
     MeshSave = "mesh_save"
     Export = "export"
+    StructuredLight = "structured_light"
 
 
 class Materials:
