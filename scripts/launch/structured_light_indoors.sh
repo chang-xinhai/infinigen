@@ -9,25 +9,40 @@
 #   3. Render Structured Light data (L_Image, R_Image, L_Depth, R_Depth, RGB, etc.)
 #
 # Usage:
-#   bash scripts/launch/structured_light_indoors.sh [SEED] [ROOM_TYPE]
+#   bash scripts/launch/structured_light_indoors.sh [SEED] [ROOM_TYPE|ALL]
 #
 # Examples:
-#   bash scripts/launch/structured_light_indoors.sh 0 DiningRoom
+#   bash scripts/launch/structured_light_indoors.sh 0
+#   bash scripts/launch/structured_light_indoors.sh 0 ALL
 #   bash scripts/launch/structured_light_indoors.sh 42 Bedroom
-#   bash scripts/launch/structured_light_indoors.sh 123
 #
 # ─────────────────────────────────────────────────────────────
 
 set -e
 
 SEED="${1:-0}"
-ROOM_TYPE="${2:-DiningRoom}"
-OUTPUT_ROOT="outputs/structured_light"
+ROOM_TYPE="${2:-ALL}"
+OUTPUT_ROOT="outputs/test/generate_whole_home"
 OUTPUT_DIR="${OUTPUT_ROOT}/seed_${SEED}"
+
+COARSE_CONFIGS=(fast_solve.gin)
+RENDER_CONFIGS=(fast_solve.gin)
+SL_CONFIGS=(fast_solve.gin structured_light.gin)
+COARSE_OVERRIDES=(compose_indoors.terrain_enabled=False)
+
+if [[ -n "${ROOM_TYPE}" && "${ROOM_TYPE}" != "ALL" ]]; then
+    COARSE_CONFIGS+=(singleroom.gin)
+    RENDER_CONFIGS+=(singleroom.gin)
+    SL_CONFIGS=(fast_solve.gin singleroom.gin structured_light.gin)
+    COARSE_OVERRIDES+=("restrict_solving.restrict_parent_rooms=[\"${ROOM_TYPE}\"]")
+    SCENE_SCOPE="single-room (${ROOM_TYPE})"
+else
+    SCENE_SCOPE="whole-home"
+fi
 
 echo "═══════════════════════════════════════════════════════════"
 echo "  Structured Light Pipeline"
-echo "  Seed: ${SEED}  Room: ${ROOM_TYPE}"
+echo "  Seed: ${SEED}  Scope: ${SCENE_SCOPE}"
 echo "  Output: ${OUTPUT_DIR}"
 echo "═══════════════════════════════════════════════════════════"
 
@@ -38,9 +53,8 @@ python -m infinigen_examples.generate_indoors \
     --seed "${SEED}" \
     --task coarse \
     --output_folder "${OUTPUT_DIR}/coarse" \
-    -g fast_solve.gin singleroom.gin \
-    -p compose_indoors.terrain_enabled=False \
-       restrict_solving.restrict_parent_rooms="[\"${ROOM_TYPE}\"]"
+    -g "${COARSE_CONFIGS[@]}" \
+    -p "${COARSE_OVERRIDES[@]}"
 
 echo ">>> Scene generated at ${OUTPUT_DIR}/coarse/scene.blend"
 
@@ -54,7 +68,7 @@ echo ">>> Scene generated at ${OUTPUT_DIR}/coarse/scene.blend"
 #     --task render \
 #     --input_folder "${OUTPUT_DIR}/coarse" \
 #     --output_folder "${OUTPUT_DIR}/frames" \
-#     -g fast_solve.gin singleroom.gin
+#     -g "${RENDER_CONFIGS[@]}"
 
 # ── Step 3: Render Structured Light ────────────────────────────
 echo ""
@@ -64,7 +78,7 @@ python -m infinigen_examples.generate_indoors \
     --task structured_light \
     --input_folder "${OUTPUT_DIR}/coarse" \
     --output_folder "${OUTPUT_DIR}/sl_frames" \
-    -g fast_solve.gin singleroom.gin structured_light.gin
+    -g "${SL_CONFIGS[@]}"
 
 echo ""
 echo "═══════════════════════════════════════════════════════════"
