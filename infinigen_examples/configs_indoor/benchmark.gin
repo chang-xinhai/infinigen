@@ -1,0 +1,20 @@
+FloorPlanSolver.n_divide_trials = 140
+FloorPlanSolver.iters_mult = 320
+
+home_room_constraints.has_fewer_rooms = False
+
+solve_objects.addition_weight_scalar = 4.0
+
+compose_indoors.solve_steps_large = 450
+compose_indoors.solve_steps_medium = 280
+compose_indoors.solve_steps_small = 90
+
+compose_indoors.terrain_enabled = False
+compose_indoors.lights_off_chance = 0.05
+compose_indoors.skirting_floor_chance = 0.95
+compose_indoors.skirting_ceiling_chance = 0.8
+compose_indoors.room_pillars_chance = 0.2
+compose_indoors.fancy_clouds_chance = 0.85
+compose_indoors.grass_chance = 0.8
+compose_indoors.rocks_chance = 0.8
+compose_indoors.near_distance = 35
