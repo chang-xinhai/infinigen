@@ -34,6 +34,16 @@ class DummyCubeGenerator(AssetFactory):
         return butil.spawn_cube()
 
 
+def sample_unique_name(curr: state_def.State, gen_class, max_attempts: int = 100):
+    for _ in range(max_attempts):
+        candidate = f"{np.random.randint(1e6):04d}_{gen_class.__name__}"
+        if candidate not in curr.objs:
+            return candidate
+    raise RuntimeError(
+        f"Failed to sample a unique name for {gen_class.__name__} after {max_attempts} attempts"
+    )
+
+
 def lookup_generator(preds: set[t.Semantics]):
     if t.contradiction(preds):
         raise ValueError(f"Got lookup_generator for unsatisfiable {preds=}")
@@ -123,13 +133,7 @@ def propose_addition_bound_gen(
     i = None
     for i, assignments in enumerate(all_assignments):
         logger.debug("Found assignments %d %s %s", i, len(assignments), assignments)
-
-        def sample_name():
-            return f"{np.random.randint(1e6):04d}_{gen_class.__name__}"
-
-        target_name = next(
-            sample_name() for _ in range(100) if sample_name() not in curr.objs
-        )
+        target_name = sample_unique_name(curr, gen_class)
 
         yield moves.Addition(
             names=[target_name],  # decided later

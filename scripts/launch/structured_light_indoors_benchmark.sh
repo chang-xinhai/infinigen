@@ -29,6 +29,8 @@ RUN_STANDARD_RENDER="${RUN_STANDARD_RENDER:-0}"
 ENABLE_MULTISTORY="${ENABLE_MULTISTORY:-0}"
 PARALLEL_MODE="${PARALLEL_MODE:-coarse_only}"
 MAX_PARALLEL_SCENES="${MAX_PARALLEL_SCENES:-10}"
+FAIL_ON_ANY_SEED_FAILURE="${FAIL_ON_ANY_SEED_FAILURE:-1}"
+PYTHON_BIN="${PYTHON_BIN:-python}"
 
 SL_MAX_SAMPLES="${SL_MAX_SAMPLES:-128}"
 
@@ -43,7 +45,13 @@ SL_OVERRIDES=(
 )
 
 LOG_ROOT="${OUTPUT_ROOT}/logs"
+SUMMARY_FILE="${LOG_ROOT}/benchmark_summary.tsv"
 mkdir -p "${LOG_ROOT}"
+
+declare -A COARSE_STATUS
+declare -A POST_STATUS
+declare -a ACTIVE_COARSE_PIDS=()
+declare -a ACTIVE_COARSE_SEEDS=()
 
 if [[ "${ENABLE_MULTISTORY}" == "1" ]]; then
     COARSE_CONFIGS+=(multistory.gin)
@@ -75,13 +83,14 @@ echo "  Multistory: ${ENABLE_MULTISTORY}"
 echo "  Parallel mode: ${PARALLEL_MODE}"
 echo "  Max parallel scenes: ${MAX_PARALLEL_SCENES}"
 echo "  SL max samples: ${SL_MAX_SAMPLES}"
+echo "  Fail on any seed failure: ${FAIL_ON_ANY_SEED_FAILURE}"
 echo "═══════════════════════════════════════════════════════════"
 
 run_coarse() {
     local seed="$1"
     local output_dir="$2"
 
-    python -m infinigen_examples.generate_indoors \
+    "${PYTHON_BIN}" -m infinigen_examples.generate_indoors \
         --seed "${seed}" \
         --task coarse \
         --output_folder "${output_dir}/coarse" \
@@ -96,7 +105,7 @@ run_render_and_sl() {
     if [[ "${RUN_STANDARD_RENDER}" == "1" ]]; then
         echo ""
         echo ">>> Step 2/3: Rendering standard RGB ..."
-        python -m infinigen_examples.generate_indoors \
+        "${PYTHON_BIN}" -m infinigen_examples.generate_indoors \
             --seed "${seed}" \
             --task render \
             --input_folder "${output_dir}/coarse" \
@@ -110,7 +119,7 @@ run_render_and_sl() {
 
     echo ""
     echo ">>> Step 3/3: Rendering structured light ..."
-    python -m infinigen_examples.generate_indoors \
+    "${PYTHON_BIN}" -m infinigen_examples.generate_indoors \
         --seed "${seed}" \
         --task structured_light \
         --input_folder "${output_dir}/coarse" \
@@ -119,15 +128,140 @@ run_render_and_sl() {
         -p "${COMMON_OVERRIDES[@]}" "${SL_OVERRIDES[@]}"
 }
 
-wait_for_slot() {
-    while true; do
-        local running
-        running=$(jobs -rp | wc -l)
-        if [[ "${running}" -lt "${MAX_PARALLEL_SCENES}" ]]; then
-            break
+collect_finished_coarse_jobs() {
+    local remaining_pids=()
+    local remaining_seeds=()
+    local pid
+    local seed
+    local rc
+    local idx
+
+    for idx in "${!ACTIVE_COARSE_PIDS[@]}"; do
+        pid="${ACTIVE_COARSE_PIDS[$idx]}"
+        seed="${ACTIVE_COARSE_SEEDS[$idx]}"
+
+        if kill -0 "${pid}" 2>/dev/null; then
+            remaining_pids+=("${pid}")
+            remaining_seeds+=("${seed}")
+            continue
         fi
-        wait -n
+
+        set +e
+        wait "${pid}"
+        rc=$?
+        set -e
+
+        if [[ "${rc}" -eq 0 ]]; then
+            COARSE_STATUS["${seed}"]="success"
+        else
+            COARSE_STATUS["${seed}"]="failed(${rc})"
+            echo "WARNING: coarse generation failed for seed ${seed} with exit code ${rc}. See ${LOG_ROOT}/seed_${seed}_coarse.log"
+        fi
     done
+
+    ACTIVE_COARSE_PIDS=("${remaining_pids[@]}")
+    ACTIVE_COARSE_SEEDS=("${remaining_seeds[@]}")
+}
+
+wait_for_slot() {
+    collect_finished_coarse_jobs
+    while [[ "${#ACTIVE_COARSE_PIDS[@]}" -ge "${MAX_PARALLEL_SCENES}" ]]; do
+        sleep 1
+        collect_finished_coarse_jobs
+    done
+}
+
+wait_for_all_coarse() {
+    collect_finished_coarse_jobs
+    while [[ "${#ACTIVE_COARSE_PIDS[@]}" -gt 0 ]]; do
+        sleep 1
+        collect_finished_coarse_jobs
+    done
+}
+
+run_postprocess_with_status() {
+    local seed="$1"
+    local output_dir="$2"
+    local log_file="$3"
+    local rc
+
+    set +e
+    (
+        run_render_and_sl "${seed}" "${output_dir}"
+    ) >"${log_file}" 2>&1
+    rc=$?
+    set -e
+
+    if [[ "${rc}" -eq 0 ]]; then
+        POST_STATUS["${seed}"]="success"
+    else
+        POST_STATUS["${seed}"]="failed(${rc})"
+        echo "WARNING: render/structured-light failed for seed ${seed} with exit code ${rc}. See ${log_file}"
+    fi
+}
+
+write_summary() {
+    local coarse_ok=0
+    local coarse_failed=0
+    local post_ok=0
+    local post_failed=0
+    local post_skipped=0
+    local any_failed=0
+    local seed
+    local coarse_state
+    local post_state
+
+    : >"${SUMMARY_FILE}"
+    printf "seed\tcoarse\tpostprocess\n" >>"${SUMMARY_FILE}"
+
+    for ((i = 0; i < NUM_SCENES; i++)); do
+        seed=$((SEED_START + i))
+        coarse_state="${COARSE_STATUS[${seed}]:-not_started}"
+        post_state="${POST_STATUS[${seed}]:-not_started}"
+        printf "%s\t%s\t%s\n" "${seed}" "${coarse_state}" "${post_state}" >>"${SUMMARY_FILE}"
+
+        if [[ "${coarse_state}" == "success" ]]; then
+            ((coarse_ok += 1))
+        else
+            ((coarse_failed += 1))
+            any_failed=1
+        fi
+
+        case "${post_state}" in
+            success)
+                ((post_ok += 1))
+                ;;
+            skipped)
+                ((post_skipped += 1))
+                ;;
+            failed*)
+                ((post_failed += 1))
+                any_failed=1
+                ;;
+            *)
+                any_failed=1
+                ;;
+        esac
+    done
+
+    echo ""
+    echo "═══════════════════════════════════════════════════════════"
+    echo "  Benchmark generation complete"
+    echo "  Scenes written under: ${OUTPUT_ROOT}"
+    echo "  Logs written under: ${LOG_ROOT}"
+    echo "  Summary written to: ${SUMMARY_FILE}"
+    echo "  Coarse success: ${coarse_ok}"
+    echo "  Coarse failed: ${coarse_failed}"
+    echo "  Post success: ${post_ok}"
+    echo "  Post failed: ${post_failed}"
+    echo "  Post skipped: ${post_skipped}"
+    echo "  Scene file: seed_<N>/coarse/scene.blend"
+    echo "  SL output: seed_<N>/sl_frames/structured_light/"
+    echo "═══════════════════════════════════════════════════════════"
+
+    if [[ "${any_failed}" -eq 1 && "${FAIL_ON_ANY_SEED_FAILURE}" == "1" ]]; then
+        return 1
+    fi
 }
 
 if [[ "${PARALLEL_MODE}" == "coarse_only" ]]; then
@@ -135,6 +269,8 @@ if [[ "${PARALLEL_MODE}" == "coarse_only" ]]; then
         SEED=$((SEED_START + i))
         OUTPUT_DIR="${OUTPUT_ROOT}/seed_${SEED}"
         LOG_FILE="${LOG_ROOT}/seed_${SEED}_coarse.log"
+        COARSE_STATUS["${SEED}"]="running"
+        POST_STATUS["${SEED}"]="pending"
 
         mkdir -p "${OUTPUT_DIR}"
         echo ""
@@ -149,14 +285,26 @@ if [[ "${PARALLEL_MODE}" == "coarse_only" ]]; then
         (
             run_coarse "${SEED}" "${OUTPUT_DIR}"
         ) >"${LOG_FILE}" 2>&1 &
+        ACTIVE_COARSE_PIDS+=("$!")
+        ACTIVE_COARSE_SEEDS+=("${SEED}")
     done
 
-    wait
+    wait_for_all_coarse
 
     for ((i = 0; i < NUM_SCENES; i++)); do
         SEED=$((SEED_START + i))
         OUTPUT_DIR="${OUTPUT_ROOT}/seed_${SEED}"
         LOG_FILE="${LOG_ROOT}/seed_${SEED}_render_sl.log"
+
+        if [[ "${COARSE_STATUS[${SEED}]}" != "success" ]]; then
+            POST_STATUS["${SEED}"]="skipped"
+            echo ""
+            echo "-----------------------------------------------------------"
+            echo "Skipping post-processing for seed=${SEED}"
+            echo "Reason: coarse generation status is ${COARSE_STATUS[${SEED}]}"
+            echo "-----------------------------------------------------------"
+            continue
+        fi
 
         echo ""
         echo "-----------------------------------------------------------"
@@ -164,15 +312,15 @@ if [[ "${PARALLEL_MODE}" == "coarse_only" ]]; then
         echo "Render/SL log: ${LOG_FILE}"
         echo "-----------------------------------------------------------"
 
-        (
-            run_render_and_sl "${SEED}" "${OUTPUT_DIR}"
-        ) >"${LOG_FILE}" 2>&1
+        run_postprocess_with_status "${SEED}" "${OUTPUT_DIR}" "${LOG_FILE}"
     done
 elif [[ "${PARALLEL_MODE}" == "off" ]]; then
     for ((i = 0; i < NUM_SCENES; i++)); do
         SEED=$((SEED_START + i))
         OUTPUT_DIR="${OUTPUT_ROOT}/seed_${SEED}"
         LOG_FILE="${LOG_ROOT}/seed_${SEED}.log"
+        COARSE_STATUS["${SEED}"]="running"
+        POST_STATUS["${SEED}"]="pending"
 
         mkdir -p "${OUTPUT_DIR}"
         echo ""
@@ -182,11 +330,27 @@ elif [[ "${PARALLEL_MODE}" == "off" ]]; then
         echo "Log: ${LOG_FILE}"
         echo "-----------------------------------------------------------"
 
+        set +e
         (
             echo ">>> Step 1/3: Generating benchmark indoor scene ..."
             run_coarse "${SEED}" "${OUTPUT_DIR}"
             run_render_and_sl "${SEED}" "${OUTPUT_DIR}"
         ) >"${LOG_FILE}" 2>&1
+        RC=$?
+        set -e
+
+        if [[ "${RC}" -eq 0 ]]; then
+            COARSE_STATUS["${SEED}"]="success"
+            POST_STATUS["${SEED}"]="success"
+        elif [[ -e "${OUTPUT_DIR}/coarse/scene.blend" ]]; then
+            COARSE_STATUS["${SEED}"]="success"
+            POST_STATUS["${SEED}"]="failed(${RC})"
+            echo "WARNING: render/structured-light failed for seed ${SEED} with exit code ${RC}. See ${LOG_FILE}"
+        else
+            COARSE_STATUS["${SEED}"]="failed(${RC})"
+            POST_STATUS["${SEED}"]="skipped"
+            echo "WARNING: coarse generation failed for seed ${SEED} with exit code ${RC}. See ${LOG_FILE}"
+        fi
     done
 else
     echo "Unsupported PARALLEL_MODE=${PARALLEL_MODE}"
@@ -194,11 +358,4 @@ else
     exit 1
 fi
 
-echo ""
-echo "═══════════════════════════════════════════════════════════"
-echo "  Benchmark generation complete"
-echo "  Scenes written under: ${OUTPUT_ROOT}"
-echo "  Logs written under: ${LOG_ROOT}"
-echo "  Scene file: seed_<N>/coarse/scene.blend"
-echo "  SL output: seed_<N>/sl_frames/structured_light/"
-echo "═══════════════════════════════════════════════════════════"
+write_summary

@@ -54,8 +54,15 @@ ENABLE_MULTISTORY=0 \
 PARALLEL_MODE=coarse_only \
 MAX_PARALLEL_SCENES=2 \
 SL_MAX_SAMPLES=128 \
+FAIL_ON_ANY_SEED_FAILURE=1 \
 bash scripts/launch/structured_light_indoors_benchmark.sh
 ```
+
+Additional compatibility knobs:
+
+- `FAIL_ON_ANY_SEED_FAILURE=1` keeps processing all seeds but returns a non-zero exit code at the end if any seed failed
+- `FAIL_ON_ANY_SEED_FAILURE=0` keeps processing all seeds and returns success even when some seeds fail
+- `PYTHON_BIN=/path/to/python` overrides the Python executable used by the launch script
 
 The current benchmark gin uses this moderate-quality profile:
 
@@ -112,6 +119,9 @@ For each seed:
 - `logs/seed_<N>_coarse.log` stores coarse-generation logs
 - `logs/seed_<N>_render_sl.log` stores render and structured-light logs in `coarse_only` mode
 - `logs/seed_<N>.log` stores the full run in `off` mode
+- `logs/benchmark_summary.tsv` stores per-seed `coarse` and `postprocess` status for the full batch
+
+When a seed fails during `coarse`, the benchmark script now keeps running the remaining seeds, marks the failed seed in `benchmark_summary.tsv`, and skips render / structured-light post-processing for that seed instead of aborting the entire batch immediately.
 
 ## Parallelism Guidance
 
