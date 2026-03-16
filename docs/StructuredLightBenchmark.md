@@ -1,6 +1,6 @@
 # Structured-Light Indoor Benchmark
 
-This workflow is for generating a small set of higher-quality indoor structured-light scenes for benchmark use, rather than fast iteration.
+This workflow is for generating a small set of indoor structured-light benchmark scenes with slightly higher quality than `fast_solve.gin`, without paying the previous order-of-magnitude runtime cost.
 
 ## Files
 
@@ -9,7 +9,7 @@ This workflow is for generating a small set of higher-quality indoor structured-
 
 ## What Changes Relative To The Fast Script
 
-The benchmark config increases floor-plan search and object-placement optimization, and it restores richer room layouts by disabling the `has_fewer_rooms=True` shortcut used in `fast_solve.gin`.
+The benchmark config increases floor-plan search and object-placement optimization relative to `fast_solve.gin`, but it stays in the same general runtime regime by keeping `has_fewer_rooms=True` and using moderate solve counts.
 
 The benchmark script also layers in:
 
@@ -18,7 +18,7 @@ The benchmark script also layers in:
 - a batch loop over multiple seeds
 - log files under `OUTPUT_ROOT/logs/`
 - optional background parallelism for the `coarse` stage
-- explicit environment-variable entry points for key benchmark hyperparameters
+- a single shared benchmark quality profile defined in `benchmark.gin`
 
 ## Default Command
 
@@ -38,9 +38,11 @@ Each scene is written to:
 outputs/benchmark/structured_light_indoors/seed_<N>/
 ```
 
-## Main Hyperparameters
+## Runtime Knobs
 
-You can override these directly at launch time:
+Scene-quality parameters now live in `infinigen_examples/configs_indoor/benchmark.gin` so they remain shared across scripts and direct `generate_indoors` invocations.
+
+The launch script only exposes runtime controls:
 
 ```bash
 NUM_SCENES=10 \
@@ -51,13 +53,20 @@ RUN_STANDARD_RENDER=0 \
 ENABLE_MULTISTORY=0 \
 PARALLEL_MODE=coarse_only \
 MAX_PARALLEL_SCENES=2 \
-FLOORPLAN_DIVIDE_TRIALS=140 \
-FLOORPLAN_ITERS_MULT=320 \
-SOLVE_STEPS_LARGE=450 \
-SOLVE_STEPS_MEDIUM=280 \
-SOLVE_STEPS_SMALL=90 \
 SL_MAX_SAMPLES=128 \
 bash scripts/launch/structured_light_indoors_benchmark.sh
+```
+
+The current benchmark gin uses this moderate-quality profile:
+
+```gin
+FloorPlanSolver.n_divide_trials = 40
+FloorPlanSolver.iters_mult = 45
+home_room_constraints.has_fewer_rooms = True
+solve_objects.addition_weight_scalar = 3.0
+compose_indoors.solve_steps_large = 150
+compose_indoors.solve_steps_medium = 65
+compose_indoors.solve_steps_small = 10
 ```
 
 You can also use positional arguments:
@@ -114,6 +123,8 @@ Recommended starting point on a 1x RTX 3090 + 62 GiB RAM machine:
 PARALLEL_MODE=coarse_only MAX_PARALLEL_SCENES=2 \
 bash scripts/launch/structured_light_indoors_benchmark.sh
 ```
+
+If scene generation stalls or total throughput drops, reduce `MAX_PARALLEL_SCENES` to `1`. The coarse stage is dominated by CPU-side solver work, and oversubscribing parallel scenes can make single-scene completion much slower.
 
 ## Validation
 

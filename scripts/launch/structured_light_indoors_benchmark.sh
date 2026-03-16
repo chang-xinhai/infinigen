@@ -16,11 +16,6 @@
 #   ENABLE_MULTISTORY=0
 #   PARALLEL_MODE=coarse_only
 #   MAX_PARALLEL_SCENES=2
-#   FLOORPLAN_DIVIDE_TRIALS=140
-#   FLOORPLAN_ITERS_MULT=320
-#   SOLVE_STEPS_LARGE=450
-#   SOLVE_STEPS_MEDIUM=280
-#   SOLVE_STEPS_SMALL=90
 #   SL_MAX_SAMPLES=128
 
 set -euo pipefail
@@ -35,25 +30,13 @@ ENABLE_MULTISTORY="${ENABLE_MULTISTORY:-0}"
 PARALLEL_MODE="${PARALLEL_MODE:-coarse_only}"
 MAX_PARALLEL_SCENES="${MAX_PARALLEL_SCENES:-10}"
 
-FLOORPLAN_DIVIDE_TRIALS="${FLOORPLAN_DIVIDE_TRIALS:-140}"
-FLOORPLAN_ITERS_MULT="${FLOORPLAN_ITERS_MULT:-320}"
-SOLVE_STEPS_LARGE="${SOLVE_STEPS_LARGE:-450}"
-SOLVE_STEPS_MEDIUM="${SOLVE_STEPS_MEDIUM:-280}"
-SOLVE_STEPS_SMALL="${SOLVE_STEPS_SMALL:-90}"
 SL_MAX_SAMPLES="${SL_MAX_SAMPLES:-128}"
 
 COARSE_CONFIGS=(benchmark.gin real_geometry_with_bump.gin)
 RENDER_CONFIGS=(benchmark.gin real_geometry_with_bump.gin)
 SL_CONFIGS=(benchmark.gin real_geometry_with_bump.gin structured_light.gin)
 
-COMMON_OVERRIDES=(
-    "FloorPlanSolver.n_divide_trials=${FLOORPLAN_DIVIDE_TRIALS}"
-    "FloorPlanSolver.iters_mult=${FLOORPLAN_ITERS_MULT}"
-    "compose_indoors.solve_steps_large=${SOLVE_STEPS_LARGE}"
-    "compose_indoors.solve_steps_medium=${SOLVE_STEPS_MEDIUM}"
-    "compose_indoors.solve_steps_small=${SOLVE_STEPS_SMALL}"
-    "compose_indoors.terrain_enabled=False"
-)
+COMMON_OVERRIDES=("compose_indoors.terrain_enabled=False")
 
 SL_OVERRIDES=(
     "render_structured_light.sl_max_samples=${SL_MAX_SAMPLES}"
@@ -91,9 +74,6 @@ echo "  Output root: ${OUTPUT_ROOT}"
 echo "  Multistory: ${ENABLE_MULTISTORY}"
 echo "  Parallel mode: ${PARALLEL_MODE}"
 echo "  Max parallel scenes: ${MAX_PARALLEL_SCENES}"
-echo "  FloorPlanSolver.n_divide_trials: ${FLOORPLAN_DIVIDE_TRIALS}"
-echo "  FloorPlanSolver.iters_mult: ${FLOORPLAN_ITERS_MULT}"
-echo "  solve_steps_large/medium/small: ${SOLVE_STEPS_LARGE}/${SOLVE_STEPS_MEDIUM}/${SOLVE_STEPS_SMALL}"
 echo "  SL max samples: ${SL_MAX_SAMPLES}"
 echo "═══════════════════════════════════════════════════════════"
 
