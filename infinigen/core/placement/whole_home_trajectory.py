@@ -3,6 +3,7 @@
 import json
 import logging
 import math
+from heapq import heappop, heappush
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,8 +12,7 @@ import bpy
 import gin
 import numpy as np
 from mathutils import Euler, Vector
-
-from infinigen.core.util import blender as butil
+from mathutils.bvhtree import BVHTree
 
 logger = logging.getLogger(__name__)
 
@@ -114,9 +114,13 @@ def _resolve_object(mesh_name: str) -> bpy.types.Object | None:
     return None
 
 
+def _world_bounds_from_box(bound_box, matrix_world) -> tuple[np.ndarray, np.ndarray]:
+    points = np.array([matrix_world @ Vector(corner) for corner in bound_box], dtype=float)
+    return points.min(axis=0), points.max(axis=0)
+
+
 def _bounds(obj: bpy.types.Object):
-    bounds = np.array(butil.bounds(obj))
-    return bounds.min(axis=0), bounds.max(axis=0)
+    return _world_bounds_from_box(obj.bound_box, obj.matrix_world)
 
 
 def _candidate_ring(center: Vector, radii: tuple[float, ...], samples: int) -> list[Vector]:
@@ -159,11 +163,12 @@ def _extract_graph(
     camera_height_m: float,
     center_search_radii_m: tuple[float, ...],
     center_search_angles: int,
-) -> tuple[dict[str, RoomRecord], dict[str, DoorRecord], dict[str, set[str]]]:
+) -> tuple[dict[str, RoomRecord], dict[str, DoorRecord], dict[str, set[str]], dict[str, set[str]]]:
     state = _load_state(scene_folder)
     rooms: dict[str, RoomRecord] = {}
     doors: dict[str, DoorRecord] = {}
     adjacency: dict[str, set[str]] = defaultdict(set)
+    wall_adjacency: dict[str, set[str]] = defaultdict(set)
 
     for name, rec in state.items():
         tags = rec.get("tags", [])
@@ -199,6 +204,14 @@ def _extract_graph(
             bbox_min=Vector(tuple(float(v) for v in bbox_min)),
             bbox_max=Vector(tuple(float(v) for v in bbox_max)),
         )
+        for relation in rec.get("relations", []):
+            relation_info = relation.get("relation", {})
+            if relation_info.get("relation_type") != "RoomNeighbour":
+                continue
+            if "Wall" in relation_info.get("connector_types", []):
+                target_name = relation.get("target_name")
+                if target_name is not None:
+                    wall_adjacency[name].add(target_name)
 
     for name, rec in state.items():
         tags = rec.get("tags", [])
@@ -218,10 +231,13 @@ def _extract_graph(
         if door_obj is None:
             logger.warning("Failed to resolve door object for %s (%s)", name, mesh_name)
             continue
-        center = _infer_portal_center(
-            rooms[connected_rooms[0]],
-            rooms[connected_rooms[1]],
-            camera_height_m=camera_height_m,
+        bbox_min, bbox_max = _bounds(door_obj)
+        center = Vector(
+            (
+                float((bbox_min[0] + bbox_max[0]) * 0.5),
+                float((bbox_min[1] + bbox_max[1]) * 0.5),
+                min(rooms[connected_rooms[0]].floor_z, rooms[connected_rooms[1]].floor_z) + camera_height_m,
+            )
         )
         doors[name] = DoorRecord(
             name=name,
@@ -235,7 +251,7 @@ def _extract_graph(
                     continue
                 adjacency[src].add(dst)
 
-    return rooms, doors, adjacency
+    return rooms, doors, adjacency, wall_adjacency
 
 
 def _interval_overlap(a_min: float, a_max: float, b_min: float, b_max: float) -> tuple[float, float, float]:
@@ -362,6 +378,90 @@ def _path_segment(
     return _resample_polyline([start, end], linear_step_m)
 
 
+def _astar_grid_path(
+    valid_mask: np.ndarray,
+    start_idx: tuple[int, int],
+    end_idx: tuple[int, int],
+    is_edge_valid=None,
+) -> list[tuple[int, int]] | None:
+    if not valid_mask[start_idx] or not valid_mask[end_idx]:
+        return None
+    if start_idx == end_idx:
+        return [start_idx]
+
+    def h(idx):
+        di = abs(idx[0] - end_idx[0])
+        dj = abs(idx[1] - end_idx[1])
+        diag = min(di, dj)
+        straight = max(di, dj) - diag
+        return math.sqrt(2.0) * diag + straight
+
+    frontier = [(h(start_idx), 0.0, start_idx)]
+    parent: dict[tuple[int, int], tuple[int, int] | None] = {start_idx: None}
+    cost = {start_idx: 0.0}
+
+    while frontier:
+        _, curr_cost, curr = heappop(frontier)
+        if curr == end_idx:
+            path = [curr]
+            while parent[path[-1]] is not None:
+                path.append(parent[path[-1]])
+            path.reverse()
+            return path
+        if curr_cost > cost[curr]:
+            continue
+        for di, dj, step_cost in (
+            (1, 0, 1.0),
+            (-1, 0, 1.0),
+            (0, 1, 1.0),
+            (0, -1, 1.0),
+            (1, 1, math.sqrt(2.0)),
+            (1, -1, math.sqrt(2.0)),
+            (-1, 1, math.sqrt(2.0)),
+            (-1, -1, math.sqrt(2.0)),
+        ):
+            nxt = (curr[0] + di, curr[1] + dj)
+            if (
+                nxt[0] < 0
+                or nxt[1] < 0
+                or nxt[0] >= valid_mask.shape[0]
+                or nxt[1] >= valid_mask.shape[1]
+                or not valid_mask[nxt]
+            ):
+                continue
+            if abs(di) + abs(dj) == 2:
+                side_a = (curr[0] + di, curr[1])
+                side_b = (curr[0], curr[1] + dj)
+                if not valid_mask[side_a] or not valid_mask[side_b]:
+                    continue
+            if is_edge_valid is not None and not is_edge_valid(curr, nxt):
+                continue
+            next_cost = curr_cost + step_cost
+            if next_cost >= cost.get(nxt, math.inf):
+                continue
+            cost[nxt] = next_cost
+            parent[nxt] = curr
+            heappush(frontier, (next_cost + h(nxt), next_cost, nxt))
+    return None
+
+
+def _shortcut_polyline(points: list[Vector], is_segment_valid) -> list[Vector]:
+    if len(points) <= 2:
+        return list(points)
+
+    result = [points[0].copy()]
+    anchor = 0
+    while anchor < len(points) - 1:
+        next_idx = anchor + 1
+        for candidate in range(len(points) - 1, anchor, -1):
+            if is_segment_valid(points[anchor], points[candidate]):
+                next_idx = candidate
+                break
+        result.append(points[next_idx].copy())
+        anchor = next_idx
+    return result
+
+
 def _interior_point(room: RoomRecord, point: Vector, clearance_m: float) -> Vector:
     margin = max(clearance_m, 0.05)
     return Vector(
@@ -410,6 +510,422 @@ def _room_path_segment(
         if (point - points[-1]).length > 1e-6:
             points.append(point)
     return _resample_polyline(points, linear_step_m)
+
+
+def _scene_ray_hit(origin: Vector, direction: Vector, distance: float) -> bool:
+    if distance <= 1e-6 or direction.length <= 1e-6:
+        return False
+    deps = bpy.context.evaluated_depsgraph_get()
+    hit, *_ = bpy.context.scene.ray_cast(deps, origin, direction.normalized(), distance=distance)
+    return bool(hit)
+
+
+def _segment_is_clear(start: Vector, end: Vector, clearance_m: float) -> bool:
+    delta = end - start
+    distance = delta.length
+    if distance <= 1e-6:
+        return True
+    direction = delta.normalized()
+    offsets = [Vector((0.0, 0.0, 0.0))]
+    lateral = Vector((-direction.y, direction.x, 0.0))
+    if lateral.length > 1e-6 and clearance_m > 1e-6:
+        lateral.normalize()
+        offsets.extend([
+            lateral * (0.5 * clearance_m),
+            -lateral * (0.5 * clearance_m),
+        ])
+    for offset in offsets:
+        if _scene_ray_hit(start + offset, delta, distance):
+            return False
+    return True
+
+
+def _room_object_ray_cast(
+    room_obj: bpy.types.Object,
+    point: Vector,
+    direction: Vector,
+):
+    world_to_local = room_obj.matrix_world.inverted()
+    local_origin = world_to_local @ point
+    local_direction = world_to_local.to_3x3() @ direction
+    if local_direction.length <= 1e-6:
+        return None
+    try:
+        hit, location, normal, face_index = room_obj.ray_cast(local_origin, local_direction.normalized())
+    except RuntimeError:
+        return None
+    if hit:
+        return location, normal, face_index
+    return None
+
+
+def _point_is_inside_room(
+    room_obj: bpy.types.Object,
+    room_bvh: BVHTree | None,
+    point: Vector,
+) -> bool:
+    if room_bvh is not None:
+        cast_up = room_bvh.ray_cast(point, Vector((0.0, 0.0, 1.0)))
+        cast_down = room_bvh.ray_cast(point, Vector((0.0, 0.0, -1.0)))
+        return cast_up[0] is not None and cast_down[0] is not None
+    return (
+        _room_object_ray_cast(room_obj, point, Vector((0.0, 0.0, 1.0))) is not None
+        and _room_object_ray_cast(room_obj, point, Vector((0.0, 0.0, -1.0))) is not None
+    )
+
+
+def _build_object_bvh(obj: bpy.types.Object) -> BVHTree | None:
+    deps = bpy.context.evaluated_depsgraph_get()
+    candidates = [obj]
+    try:
+        candidates.insert(0, obj.evaluated_get(deps))
+    except Exception:
+        pass
+    for candidate in candidates:
+        try:
+            return BVHTree.FromObject(candidate, deps)
+        except Exception:
+            continue
+    logger.warning("Failed to build BVH for %s; planner will use fallback logic", obj.name)
+    return None
+
+
+def _point_has_scene_clearance(point: Vector, clearance_m: float) -> bool:
+    if clearance_m <= 1e-6:
+        return True
+    for angle in np.linspace(0.0, 2.0 * np.pi, 8, endpoint=False):
+        direction = Vector((math.cos(angle), math.sin(angle), 0.0))
+        half_probe = 0.5 * clearance_m * direction
+        if not _segment_is_clear(point - half_probe, point + half_probe, 0.0):
+            return False
+        if _scene_ray_hit(point, direction, clearance_m):
+            return False
+    return True
+
+
+def _point_in_bbox(point: Vector, bbox_min: Vector, bbox_max: Vector, margin: float) -> bool:
+    return (
+        bbox_min.x - margin <= point.x <= bbox_max.x + margin
+        and bbox_min.y - margin <= point.y <= bbox_max.y + margin
+    )
+
+
+def _point_has_room_floor(room: RoomRecord, point: Vector, floor_tol_m: float = 0.25) -> bool:
+    deps = bpy.context.evaluated_depsgraph_get()
+    origin = point + Vector((0.0, 0.0, 0.5))
+    max_drop = max(2.5, point.z - room.floor_z + 1.0)
+    hit, loc, *_ = bpy.context.scene.ray_cast(
+        deps,
+        origin,
+        Vector((0.0, 0.0, -1.0)),
+        distance=max_drop,
+    )
+    return bool(hit) and abs(loc.z - room.floor_z) <= floor_tol_m
+
+
+def _is_navigable_room_point(
+    room: RoomRecord,
+    room_obj: bpy.types.Object,
+    room_bvh: BVHTree | None,
+    point: Vector,
+    clearance_m: float,
+    forbidden_bboxes: list[tuple[Vector, Vector]] | None = None,
+) -> bool:
+    if not _point_in_bbox(point, room.bbox_min, room.bbox_max, -clearance_m):
+        return False
+    if forbidden_bboxes is not None:
+        for bbox_min, bbox_max in forbidden_bboxes:
+            if _point_in_bbox(point, bbox_min, bbox_max, clearance_m):
+                return False
+    return _point_has_room_floor(room, point) and _point_has_scene_clearance(point, clearance_m)
+
+
+def _find_valid_room_point(
+    room: RoomRecord,
+    room_obj: bpy.types.Object,
+    room_bvh: BVHTree | None,
+    desired: Vector,
+    clearance_m: float,
+    search_step_m: float,
+    forbidden_bboxes: list[tuple[Vector, Vector]] | None = None,
+) -> Vector:
+    desired = _interior_point(room, desired, clearance_m)
+    radii = [0.0, search_step_m, 2.0 * search_step_m, 4.0 * search_step_m, 8.0 * search_step_m]
+    best = None
+    best_score = math.inf
+    for radius in radii:
+        sample_count = 1 if radius <= 1e-6 else 16
+        for angle in np.linspace(0.0, 2.0 * np.pi, sample_count, endpoint=False):
+            candidate = Vector(
+                (
+                    desired.x + radius * math.cos(angle),
+                    desired.y + radius * math.sin(angle),
+                    room.center.z,
+                )
+            )
+            candidate = _interior_point(room, candidate, clearance_m)
+            if not _is_navigable_room_point(
+                room,
+                room_obj,
+                room_bvh,
+                candidate,
+                clearance_m,
+                forbidden_bboxes=forbidden_bboxes,
+            ):
+                continue
+            score = (candidate - desired).length
+            if score < best_score:
+                best = candidate
+                best_score = score
+        if best is not None:
+            return best
+    return desired
+
+
+def _nearest_valid_grid_index(
+    valid_mask: np.ndarray,
+    xs: np.ndarray,
+    ys: np.ndarray,
+    point: Vector,
+) -> tuple[int, int] | None:
+    candidates = np.argwhere(valid_mask)
+    if len(candidates) == 0:
+        return None
+    best = None
+    best_dist = math.inf
+    for i, j in candidates:
+        d = (xs[i] - point.x) ** 2 + (ys[j] - point.y) ** 2
+        if d < best_dist:
+            best = (int(i), int(j))
+            best_dist = d
+    return best
+
+
+def _collision_aware_room_path_segment(
+    room: RoomRecord,
+    room_obj: bpy.types.Object,
+    room_bvh: BVHTree | None,
+    start: Vector,
+    end: Vector,
+    linear_step_m: float,
+    clearance_m: float,
+    grid_step_m: float,
+    forbidden_bboxes: list[tuple[Vector, Vector]] | None = None,
+) -> list[Vector]:
+    start = _find_valid_room_point(
+        room, room_obj, room_bvh, start, clearance_m, grid_step_m, forbidden_bboxes=forbidden_bboxes
+    )
+    end = _find_valid_room_point(
+        room, room_obj, room_bvh, end, clearance_m, grid_step_m, forbidden_bboxes=forbidden_bboxes
+    )
+    if (start - end).length < 1e-6:
+        return [start]
+    if _segment_is_clear(start, end, clearance_m) and _is_navigable_room_point(
+        room,
+        room_obj,
+        room_bvh,
+        0.5 * (start + end),
+        clearance_m,
+        forbidden_bboxes=forbidden_bboxes,
+    ):
+        return _resample_polyline([start, end], linear_step_m)
+
+    margin = max(clearance_m, 0.05)
+    xs = np.arange(room.bbox_min.x + margin, room.bbox_max.x - margin + 1e-6, grid_step_m)
+    ys = np.arange(room.bbox_min.y + margin, room.bbox_max.y - margin + 1e-6, grid_step_m)
+    if len(xs) == 0 or len(ys) == 0:
+        return _room_path_segment(room, start, end, linear_step_m, clearance_m)
+
+    valid_mask = np.zeros((len(xs), len(ys)), dtype=bool)
+    for i, x in enumerate(xs):
+        for j, y in enumerate(ys):
+            point = Vector((float(x), float(y), room.center.z))
+            valid_mask[i, j] = _is_navigable_room_point(
+                room,
+                room_obj,
+                room_bvh,
+                point,
+                clearance_m,
+                forbidden_bboxes=forbidden_bboxes,
+            )
+
+    start_idx = _nearest_valid_grid_index(valid_mask, xs, ys, start)
+    end_idx = _nearest_valid_grid_index(valid_mask, xs, ys, end)
+    if start_idx is None or end_idx is None:
+        return _room_path_segment(room, start, end, linear_step_m, clearance_m)
+
+    def point_for(idx):
+        return Vector((float(xs[idx[0]]), float(ys[idx[1]]), room.center.z))
+
+    path_idx = _astar_grid_path(
+        valid_mask,
+        start_idx,
+        end_idx,
+        is_edge_valid=lambda a, b: _segment_is_clear(point_for(a), point_for(b), clearance_m),
+    )
+    if path_idx is None:
+        return _room_path_segment(room, start, end, linear_step_m, clearance_m)
+
+    path_points = [start.copy()]
+    for idx in path_idx[1:-1]:
+        point = point_for(idx)
+        if (point - path_points[-1]).length > 1e-6:
+            path_points.append(point)
+    if (end - path_points[-1]).length > 1e-6:
+        path_points.append(end.copy())
+
+    shortcut_points = _shortcut_polyline(
+        path_points,
+        is_segment_valid=lambda a, b: _segment_is_clear(a, b, clearance_m)
+        and _is_navigable_room_point(
+            room,
+            room_obj,
+            room_bvh,
+            0.5 * (a + b),
+            clearance_m,
+            forbidden_bboxes=forbidden_bboxes,
+        ),
+    )
+    return _resample_polyline(shortcut_points, linear_step_m)
+
+
+def _local_bbox_path(
+    start: Vector,
+    end: Vector,
+    bbox_min: Vector,
+    bbox_max: Vector,
+    grid_step_m: float,
+    linear_step_m: float,
+    clearance_m: float,
+) -> list[Vector] | None:
+    margin = max(clearance_m, 0.05)
+    xs = np.arange(bbox_min.x + margin, bbox_max.x - margin + 1e-6, grid_step_m)
+    ys = np.arange(bbox_min.y + margin, bbox_max.y - margin + 1e-6, grid_step_m)
+    if len(xs) == 0 or len(ys) == 0:
+        return None
+
+    def point_for(idx):
+        return Vector((float(xs[idx[0]]), float(ys[idx[1]]), start.z))
+
+    valid_mask = np.zeros((len(xs), len(ys)), dtype=bool)
+    for i, x in enumerate(xs):
+        for j, y in enumerate(ys):
+            valid_mask[i, j] = _point_has_scene_clearance(
+                Vector((float(x), float(y), start.z)),
+                clearance_m,
+            )
+
+    start_idx = _nearest_valid_grid_index(valid_mask, xs, ys, start)
+    end_idx = _nearest_valid_grid_index(valid_mask, xs, ys, end)
+    if start_idx is None or end_idx is None:
+        return None
+
+    path_idx = _astar_grid_path(
+        valid_mask,
+        start_idx,
+        end_idx,
+        is_edge_valid=lambda a, b: _segment_is_clear(point_for(a), point_for(b), clearance_m),
+    )
+    if path_idx is None:
+        return None
+    path_points = [start.copy()]
+    for idx in path_idx[1:-1]:
+        point = point_for(idx)
+        if (point - path_points[-1]).length > 1e-6:
+            path_points.append(point)
+    if (end - path_points[-1]).length > 1e-6:
+        path_points.append(end.copy())
+    shortcut_points = _shortcut_polyline(
+        path_points,
+        is_segment_valid=lambda a, b: _segment_is_clear(a, b, clearance_m),
+    )
+    return _resample_polyline(shortcut_points, linear_step_m)
+
+
+def _repair_colliding_samples(
+    samples: list[dict],
+    rooms: dict[str, RoomRecord],
+    linear_step_m: float,
+    clearance_m: float,
+    grid_step_m: float,
+    lookahead_pts: int,
+    pitch_deg: float,
+    repair_margin_m: float,
+) -> list[dict]:
+    repaired = list(samples)
+    max_passes = 3
+
+    for _ in range(max_passes):
+        blocked_segments = [
+            idx
+            for idx in range(1, len(repaired))
+            if not _segment_is_clear(
+                repaired[idx - 1]["location"],
+                repaired[idx]["location"],
+                clearance_m,
+            )
+        ]
+        if not blocked_segments:
+            return repaired
+
+        run_start = blocked_segments[0]
+        run_end = run_start
+        while run_end + 1 in blocked_segments:
+            run_end += 1
+
+        start_idx = max(0, run_start - 1)
+        end_idx = min(len(repaired) - 1, run_end + 1)
+        involved_rooms = {
+            repaired[idx]["room"]
+            for idx in range(start_idx, end_idx + 1)
+            if repaired[idx]["room"] in rooms
+        }
+        if not involved_rooms:
+            break
+
+        bbox_min = Vector((math.inf, math.inf, repaired[start_idx]["location"].z))
+        bbox_max = Vector((-math.inf, -math.inf, repaired[start_idx]["location"].z))
+        for room_name in involved_rooms:
+            room = rooms[room_name]
+            bbox_min.x = min(bbox_min.x, room.bbox_min.x)
+            bbox_min.y = min(bbox_min.y, room.bbox_min.y)
+            bbox_max.x = max(bbox_max.x, room.bbox_max.x)
+            bbox_max.y = max(bbox_max.y, room.bbox_max.y)
+        bbox_min.x -= repair_margin_m
+        bbox_min.y -= repair_margin_m
+        bbox_max.x += repair_margin_m
+        bbox_max.y += repair_margin_m
+
+        repaired_path = _local_bbox_path(
+            start=repaired[start_idx]["location"],
+            end=repaired[end_idx]["location"],
+            bbox_min=bbox_min,
+            bbox_max=bbox_max,
+            grid_step_m=grid_step_m,
+            linear_step_m=linear_step_m,
+            clearance_m=clearance_m,
+        )
+        if repaired_path is None or len(repaired_path) < 2:
+            break
+
+        replacement_samples = []
+        _append_traversal_samples(
+            samples=replacement_samples,
+            path_points=repaired_path,
+            room_name=repaired[start_idx + 1]["room"],
+            state_name=f"{repaired[start_idx + 1]['state']}_repair",
+            lookahead_pts=lookahead_pts,
+            pitch_deg=pitch_deg,
+        )
+        if len(replacement_samples) < 2:
+            break
+        repaired = (
+            repaired[: start_idx + 1]
+            + replacement_samples[1:-1]
+            + repaired[end_idx:]
+        )
+
+    return repaired
 
 
 def _door_anchor(
@@ -609,11 +1125,14 @@ def animate_whole_home_walk(
     room_sweep_angle_deg: float = 300.0,
     room_sweep_yaw_speed_deg_s: float = 40.0,
     enable_room_orbit: bool = False,
-    room_path_mode: str = "orthogonal",
+    room_path_mode: str = "collision_aware_grid",
     room_orbit_min_room_radius_m: float = 1.2,
     room_orbit_radius_scale: float = 0.45,
     room_orbit_radius_min_m: float = 0.35,
     room_orbit_radius_max_m: float = 0.9,
+    room_grid_step_m: float = 0.10,
+    enable_collision_repair: bool = True,
+    collision_repair_margin_m: float = 0.75,
     traversal_pitch_deg: float = -4.0,
     sweep_pitch_deg: float = -2.0,
     traversal_lookahead_pts: int = 5,
@@ -640,7 +1159,7 @@ def animate_whole_home_walk(
             expected_step_m,
         )
 
-    rooms, doors, adjacency = _extract_graph(
+    rooms, doors, adjacency, wall_adjacency = _extract_graph(
         scene_folder=Path(input_folder),
         camera_height_m=camera_height_m,
         center_search_radii_m=tuple(room_center_search_radii_m),
@@ -648,6 +1167,37 @@ def animate_whole_home_walk(
     )
     if not rooms:
         raise WholeHomeWalkError("Failed to recover any rooms from solve_state / scene")
+
+    forbidden_room_bboxes: dict[str, list[tuple[Vector, Vector]]] = defaultdict(list)
+    for room_name, neighbor_names in wall_adjacency.items():
+        for neighbor_name in neighbor_names:
+            neighbor = rooms.get(neighbor_name)
+            if neighbor is None:
+                continue
+            forbidden_room_bboxes[room_name].append((neighbor.bbox_min, neighbor.bbox_max))
+
+    room_objs: dict[str, bpy.types.Object] = {}
+    room_bvhs: dict[str, BVHTree | None] = {}
+    for room in rooms.values():
+        room_obj = bpy.data.objects.get(room.mesh_name)
+        if room_obj is None:
+            continue
+        room_objs[room.name] = room_obj
+        room_bvhs[room.name] = _build_object_bvh(room_obj)
+    for room_name, room in rooms.items():
+        room_obj = room_objs.get(room_name)
+        room_bvh = room_bvhs.get(room_name)
+        if room_obj is None:
+            continue
+        room.center = _find_valid_room_point(
+            room=room,
+            room_obj=room_obj,
+            room_bvh=room_bvh,
+            desired=room.center,
+            clearance_m=clearance_m,
+            search_step_m=max(room_grid_step_m, linear_step_m),
+            forbidden_bboxes=forbidden_room_bboxes.get(room_name),
+        )
 
     if force_open_access_doors:
         _force_open_access_doors(
@@ -713,10 +1263,57 @@ def animate_whole_home_walk(
         if src == dst:
             continue
         door = _choose_door(doors, rooms, src, dst)
+        src_room_bvh = room_bvhs.get(src)
+        dst_room_bvh = room_bvhs.get(dst)
+        src_room_obj = room_objs.get(src)
+        dst_room_obj = room_objs.get(dst)
         src_anchor = _door_anchor(door, rooms[src], door_offset_m, clearance_m=clearance_m)
         dst_anchor = _door_anchor(door, rooms[dst], door_offset_m, clearance_m=clearance_m)
+        if src_room_obj is not None:
+            src_anchor = _find_valid_room_point(
+                room=rooms[src],
+                room_obj=src_room_obj,
+                room_bvh=src_room_bvh,
+                desired=src_anchor,
+                clearance_m=clearance_m,
+                search_step_m=max(room_grid_step_m, linear_step_m),
+                forbidden_bboxes=forbidden_room_bboxes.get(src),
+            )
+        if dst_room_obj is not None:
+            dst_anchor = _find_valid_room_point(
+                room=rooms[dst],
+                room_obj=dst_room_obj,
+                room_bvh=dst_room_bvh,
+                desired=dst_anchor,
+                clearance_m=clearance_m,
+                search_step_m=max(room_grid_step_m, linear_step_m),
+                forbidden_bboxes=forbidden_room_bboxes.get(dst),
+            )
 
-        if room_path_mode == "orthogonal":
+        if room_path_mode == "collision_aware_grid" and src_room_obj is not None and dst_room_obj is not None:
+            seg_a = _collision_aware_room_path_segment(
+                room=rooms[src],
+                room_obj=src_room_obj,
+                room_bvh=src_room_bvh,
+                start=rooms[src].center,
+                end=src_anchor,
+                linear_step_m=linear_step_m,
+                clearance_m=clearance_m,
+                grid_step_m=room_grid_step_m,
+                forbidden_bboxes=forbidden_room_bboxes.get(src),
+            )
+            seg_c = _collision_aware_room_path_segment(
+                room=rooms[dst],
+                room_obj=dst_room_obj,
+                room_bvh=dst_room_bvh,
+                start=dst_anchor,
+                end=rooms[dst].center,
+                linear_step_m=linear_step_m,
+                clearance_m=clearance_m,
+                grid_step_m=room_grid_step_m,
+                forbidden_bboxes=forbidden_room_bboxes.get(dst),
+            )
+        elif room_path_mode in {"collision_aware_grid", "orthogonal"}:
             seg_a = _room_path_segment(
                 room=rooms[src],
                 start=rooms[src].center,
@@ -777,6 +1374,18 @@ def animate_whole_home_walk(
     if not samples:
         raise WholeHomeWalkError("Planner produced no camera samples")
 
+    if enable_collision_repair:
+        samples = _repair_colliding_samples(
+            samples=samples,
+            rooms=rooms,
+            linear_step_m=linear_step_m,
+            clearance_m=clearance_m,
+            grid_step_m=room_grid_step_m,
+            lookahead_pts=traversal_lookahead_pts,
+            pitch_deg=traversal_pitch_deg,
+            repair_margin_m=collision_repair_margin_m,
+        )
+
     scene = bpy.context.scene
     scene.render.fps = planner_fps
     scene.frame_start = 1
@@ -795,7 +1404,8 @@ def animate_whole_home_walk(
 
     metadata = {
         "planner": "whole_home_walk",
-        "navigation_mode": "doorway_straight_segments",
+        "navigation_mode": room_path_mode,
+        "scene_modified": True,
         "scene_seed": scene_seed,
         "planner_fps": planner_fps,
         "frame_start": scene.frame_start,
@@ -816,6 +1426,9 @@ def animate_whole_home_walk(
         "room_orbit_radius_scale": room_orbit_radius_scale,
         "room_orbit_radius_min_m": room_orbit_radius_min_m,
         "room_orbit_radius_max_m": room_orbit_radius_max_m,
+        "room_grid_step_m": room_grid_step_m,
+        "enable_collision_repair": enable_collision_repair,
+        "collision_repair_margin_m": collision_repair_margin_m,
         "traversal_pitch_deg": traversal_pitch_deg,
         "sweep_pitch_deg": sweep_pitch_deg,
         "force_open_access_doors": force_open_access_doors,

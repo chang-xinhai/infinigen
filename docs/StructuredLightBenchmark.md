@@ -73,6 +73,7 @@ Additional compatibility knobs:
 - `ENABLE_WHOLE_HOME_WALK=1` inserts a `trajectory` stage between `coarse` and rendering
 - `REUSE_EXISTING_COARSE=1` skips scene generation for seeds that already have `coarse/scene.blend` and reuses those scenes for whole-home trajectory planning and rendering
 - `WALK_CAMERA_HEIGHT_M`, `WALK_FPS`, `WALK_STEP_M`, `WALK_CLEARANCE_M`, `WALK_PATH_MARGIN_M`, and `WALK_PATH_RESOLUTION` override the default whole-home walk planner hyperparameters without editing code
+- the default whole-home planner now uses `room_path_mode="collision_aware_grid"` with `room_grid_step_m=0.10` from `whole_home_walk.gin`
 
 The current benchmark gin uses this moderate-quality profile:
 
@@ -124,7 +125,7 @@ NUM_SCENES=10 ROOM_TYPE=Bedroom bash scripts/launch/structured_light_indoors_ben
 For each seed:
 
 - `coarse/scene.blend` stores the generated scene
-- `trajectory/scene.blend` stores the same scene with whole-home walking camera animation
+- `trajectory/scene.blend` stores the same scene with whole-home walking camera animation when the trajectory stage actually changes the scene
 - `trajectory/trajectory_metadata.json` stores planner parameters, room order, and per-frame camera poses
 - `sl_frames/structured_light/` stores structured-light outputs
 - `frames/` is generated only when `RUN_STANDARD_RENDER=1`
@@ -181,6 +182,38 @@ Notes:
 - preview renders now auto-adjust camera sensor dimensions before saving camera parameters, so `320x240` runs can exit cleanly
 - reused indoor benchmark scenes may already have most scene lights deleted by the `coarse` pipeline, so `full/render_image.preview_force_lighting=True` is the intended verification-time fallback
 - the visible white speckle problem in old low-cost previews was not caused by `320x240` resolution itself; it came from low-sample Monte Carlo noise plus bright indirect transport, and the preview path now supports `full/render_image.preview_force_denoising=True`, `preview_disable_caustics=True`, and `preview_sample_clamp_*` overrides to control it
+- for a cleaner isolated RGB-only rerender from an existing trajectory scene, point `--output_folder` at a fresh parent such as `outputs/.../seed_0_rgb_v11/render`; Infinigen will write the actual frame products under that parent’s sibling `frames/` directory
+- on CPU-only machines, a full-sequence Cycles rerender is practical for this benchmark scene when stdout is redirected to a log file; if needed, the same command can be resumed in small `execute_tasks.frame_range=[start,end]` chunks without touching the trajectory scene
+
+Validated full-sequence rerender example on the current machine:
+
+```bash
+MPLCONFIGDIR=/tmp/mpl conda run -n infinigen_311 python -m infinigen_examples.generate_indoors \
+    --seed 0 \
+    --task render \
+    --input_folder outputs/benchmark/structured_light_indoors/seed_0/trajectory_check_fps3_v11 \
+    --output_folder outputs/benchmark/structured_light_indoors/seed_0_rgb_v11/render \
+    -g benchmark.gin real_geometry_with_bump.gin whole_home_walk.gin \
+    -p execute_tasks.use_scene_frame_range=True \
+       full/render_image.passes_to_save=[] \
+       full/render_image.override_num_samples=16 \
+       full/render_image.render_resolution_override='(320, 240)' \
+       full/render_image.preview_force_lighting=True \
+       full/render_image.preview_world_strength=0.25 \
+       full/render_image.preview_sun_energy=1.0 \
+       full/render_image.preview_camera_light_energy=120.0 \
+       full/render_image.preview_force_denoising=True \
+       full/render_image.preview_disable_caustics=True \
+       full/render_image.preview_sample_clamp_indirect=0.75 \
+       full/render_image.preview_sample_clamp_direct=2.5
+```
+
+This validated run writes:
+
+- `372` RGB pngs under `outputs/benchmark/structured_light_indoors/seed_0_rgb_v11/frames/Image/camera_0/`
+- `372` RGB exrs under the same directory
+- `372` camera parameter files under `outputs/benchmark/structured_light_indoors/seed_0_rgb_v11/frames/camview/camera_0/`
+- review artifacts such as `rgb_contact_sheet.png` and `rgb_preview_stride4.gif` under `outputs/benchmark/structured_light_indoors/seed_0_rgb_v11/`
 
 ## Parallelism Guidance
 

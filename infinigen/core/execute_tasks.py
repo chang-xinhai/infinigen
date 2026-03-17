@@ -266,13 +266,22 @@ def execute_tasks(
     if Task.Populate in task and populate_scene_func is not None:
         populate_scene_func(output_folder, scene_seed, camera_rigs)
 
+    scene_modified = (
+        Task.Coarse in task
+        or Task.Populate in task
+        or Task.FineTerrain in task
+        or Task.Trajectory in task
+    )
+
     if Task.Trajectory in task and trajectory_scene_func is not None:
-        trajectory_scene_func(
+        trajectory_result = trajectory_scene_func(
             input_folder=input_folder,
             output_folder=output_folder,
             scene_seed=scene_seed,
             camera_rigs=camera_rigs,
         )
+        if isinstance(trajectory_result, dict):
+            scene_modified = trajectory_result.get("scene_modified", scene_modified)
 
     need_terrain_processing = "atmosphere" in bpy.data.objects
 
@@ -312,6 +321,10 @@ def execute_tasks(
                 f"Writing output blendfile to {output_folder / output_blend_name}"
             )
             if optimize_terrain_diskusage and task == [Task.FineTerrain]:
+                os.symlink(
+                    input_folder / output_blend_name, output_folder / output_blend_name
+                )
+            elif not scene_modified and input_folder is not None and input_folder != output_folder:
                 os.symlink(
                     input_folder / output_blend_name, output_folder / output_blend_name
                 )

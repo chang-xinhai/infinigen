@@ -7,18 +7,22 @@ Implementation status in this repository:
 - a new `trajectory` task can animate an existing indoor `coarse/scene.blend`
 - whole-home walk hyperparameters are exposed in `infinigen_examples/configs_indoor/whole_home_walk.gin`
 - the benchmark launch script can reuse existing `coarse` scenes and render from the animated `trajectory` scene
-- the currently validated runtime implementation uses `doorway_straight_segments` as its navigation realization mode instead of the heavier scene-wide BVH pathfinder
-- doorway centers are inferred from adjacent room bounds instead of trusting door object origins, which avoids the `0,0` portal failure seen in the first draft
+- the current runtime implementation uses a `collision_aware_grid` room planner with explicit scene ray-cast checks instead of bbox-only doorway segments
+- doorway centers now come from door cutter world-space bounds, not local-space bounds or broken object origins
 - room orbit is disabled by default in benchmark configs; the default room coverage motif is now door-to-room traversal plus in-place sweep
-- room-internal travel now uses an orthogonal `L`-shaped path by default instead of a direct diagonal from room center to doorway anchor, which makes transitions look more like door-based walking
+- room-internal travel now defaults to a collision-aware grid search with explicit `room_grid_step_m`; `orthogonal` remains available as a fallback mode
+- the validated `collision_aware_grid` planner now uses 8-connected room search plus visibility-based shortcut smoothing, so room traversal is less Manhattan-like while still honoring scene ray-cast clearance
 - access doors can be post-processed open during `trajectory` generation; the current validated mode hides doorway leaf geometry in the saved trajectory scene
+- `trajectory/scene.blend` is only written when the trajectory stage actually modifies the scene; unchanged scenes can now reuse the input blend by symlink instead of copying
 
 Validation status:
 
 - validated on an existing benchmark scene copied from `outputs/benchmark/structured_light_indoors/seed_0/coarse`
 - trajectory planning completed successfully in `infinigen_311` and wrote `trajectory/scene.blend` plus `trajectory_metadata.json`
 - on `seed_0`, door centers now resolve to interior portal locations such as `(3.25, 3.5)`, `(7.75, 4.25)`, and `(5.0, 12.75)` instead of the invalid `(0, 0)` fallback
-- on `seed_0`, room transitions now use `room_path_mode="orthogonal"` and the saved trajectory metadata records `force_open_access_doors=True`
+- on `seed_0`, room transitions now use `room_path_mode="collision_aware_grid"` and the saved trajectory metadata records `force_open_access_doors=True`
+- on `seed_0/trajectory_check_fps3_v11`, the current validated benchmark trajectory runs at `planner_fps=3`, spans `372` frames and `43.98 m`, and `scene.ray_cast` reports `0` blocked centerline segments across the full sample sequence
+- on `seed_0_rgb_v11`, the same `seed_0/trajectory_check_fps3_v11` animation was rerendered as a full real RGB-only Cycles sequence at `320x240` with `16` samples, denoising, and preview relighting, producing a complete `372`-frame sequence under `frames/Image/camera_0/`
 - structured-light rendering wrote complete low-resolution outputs for both 2-frame and 1-frame checks under `/tmp/whole_home_walk_e2e/seed_0/`
 - the current `infinigen_311 + bpy` runtime still segfaults on shutdown after rendering completes, but the structured-light outputs are already present on disk when that happens
 

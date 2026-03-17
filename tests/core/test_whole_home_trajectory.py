@@ -1,13 +1,17 @@
 # Copyright (C) 2026.
 
-from mathutils import Vector
+import numpy as np
+from mathutils import Matrix, Vector
 
 from infinigen.core.placement.whole_home_trajectory import (
     DoorRecord,
     RoomRecord,
+    _astar_grid_path,
     _door_anchor,
     _infer_portal_center,
     _room_path_segment,
+    _shortcut_polyline,
+    _world_bounds_from_box,
 )
 
 
@@ -80,3 +84,48 @@ def test_room_path_segment_uses_orthogonal_turn_inside_room():
     mid = turn_points[0]
     assert room.bbox_min.x + 0.2 <= mid.x <= room.bbox_max.x - 0.2
     assert room.bbox_min.y + 0.2 <= mid.y <= room.bbox_max.y - 0.2
+
+
+def test_world_bounds_from_box_applies_world_transform():
+    bound_box = [
+        (-1.0, -2.0, -0.5),
+        (1.0, -2.0, -0.5),
+        (1.0, 2.0, -0.5),
+        (-1.0, 2.0, -0.5),
+        (-1.0, -2.0, 0.5),
+        (1.0, -2.0, 0.5),
+        (1.0, 2.0, 0.5),
+        (-1.0, 2.0, 0.5),
+    ]
+    matrix_world = Matrix.Translation(Vector((4.0, 5.0, 1.0)))
+
+    bbox_min, bbox_max = _world_bounds_from_box(bound_box, matrix_world)
+
+    assert np.allclose(bbox_min, np.array([3.0, 3.0, 0.5]))
+    assert np.allclose(bbox_max, np.array([5.0, 7.0, 1.5]))
+
+
+def test_astar_grid_path_routes_around_blocked_cells():
+    valid = np.ones((5, 5), dtype=bool)
+    valid[2, 1:4] = False
+
+    path = _astar_grid_path(valid, (0, 2), (4, 2))
+
+    assert path is not None
+    assert path[0] == (0, 2)
+    assert path[-1] == (4, 2)
+    assert all(valid[idx] for idx in path)
+    assert any(step[1] != 2 for step in path)
+
+
+def test_shortcut_polyline_removes_visibility_redundant_turns():
+    points = [
+        Vector((0.0, 0.0, 0.0)),
+        Vector((1.0, 0.0, 0.0)),
+        Vector((1.0, 1.0, 0.0)),
+        Vector((2.0, 1.0, 0.0)),
+    ]
+
+    shortcut = _shortcut_polyline(points, is_segment_valid=lambda a, b: True)
+
+    assert shortcut == [Vector((0.0, 0.0, 0.0)), Vector((2.0, 1.0, 0.0))]
