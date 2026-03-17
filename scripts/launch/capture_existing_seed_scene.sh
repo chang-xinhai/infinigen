@@ -50,6 +50,7 @@ if [[ -n "${CONDA_ENV}" ]]; then
 else
     PY_CMD=("${PYTHON_BIN}")
 fi
+POST_PYTHON_BIN="${POST_PYTHON_BIN:-python}"
 
 export MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp/mpl}"
 mkdir -p "${MPLCONFIGDIR}"
@@ -215,7 +216,7 @@ run_rgb_render() {
     fi
 
     if [[ "${GENERATE_PREVIEW_ARTIFACTS}" == "1" ]]; then
-        "${PY_CMD[@]}" - <<PY
+        "${POST_PYTHON_BIN}" - <<PY
 from pathlib import Path
 from PIL import Image, ImageDraw
 
