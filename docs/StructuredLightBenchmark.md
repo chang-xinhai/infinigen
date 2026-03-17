@@ -7,6 +7,7 @@ This workflow is for generating a small set of indoor structured-light benchmark
 - `infinigen_examples/configs_indoor/benchmark.gin`
 - `infinigen_examples/configs_indoor/whole_home_walk.gin`
 - `scripts/launch/structured_light_indoors_benchmark.sh`
+- `scripts/launch/capture_existing_seed_scene.sh`
 
 ## What Changes Relative To The Fast Script
 
@@ -214,6 +215,115 @@ This validated run writes:
 - `372` RGB exrs under the same directory
 - `372` camera parameter files under `outputs/benchmark/structured_light_indoors/seed_0_rgb_v11/frames/camview/camera_0/`
 - review artifacts such as `rgb_contact_sheet.png` and `rgb_preview_stride4.gif` under `outputs/benchmark/structured_light_indoors/seed_0_rgb_v11/`
+
+## Existing Seed Scene Capture
+
+For batch reruns on already-generated benchmark scenes such as `outputs/benchmark/structured_light_indoors/seed_42/coarse/scene.blend`, use:
+
+```bash
+bash scripts/launch/capture_existing_seed_scene.sh <SCENE_DIR> <MODE>
+```
+
+where:
+
+- `SCENE_DIR` is the seed root, for example `outputs/benchmark/structured_light_indoors/seed_42`
+- `MODE` is `rgb_only` or `full`
+
+The script infers `scene_seed` from the `seed_<N>` folder name, reruns the whole-home trajectory stage if needed, and then renders either RGB-only outputs or the full RGB + structured-light package.
+
+### RGB-only
+
+Recommended command:
+
+```bash
+CONDA_ENV=infinigen_311 \
+RUN_TAG=fps3_rgb320 \
+WALK_FPS=3 \
+WALK_STEP_M=0.15 \
+RGB_WIDTH=320 \
+RGB_HEIGHT=240 \
+RGB_SAMPLES=16 \
+RGB_DELETE_EXR_AFTER_RENDER=1 \
+bash scripts/launch/capture_existing_seed_scene.sh \
+    outputs/benchmark/structured_light_indoors/seed_42 \
+    rgb_only
+```
+
+This mode:
+
+- writes trajectory outputs to `outputs/benchmark/structured_light_indoors/seed_42/trajectory_<RUN_TAG>/`
+- writes RGB outputs to `outputs/benchmark/structured_light_indoors/seed_42_<RUN_TAG>_rgb/frames/`
+- deletes RGB `exr` files by default so the final RGB directory only keeps `png` frames plus camera metadata
+- writes `rgb_contact_sheet.png` and `rgb_preview_stride*.gif` for quick inspection
+
+### Full
+
+Recommended command:
+
+```bash
+CONDA_ENV=infinigen_311 \
+RUN_TAG=full_fps3 \
+WALK_FPS=3 \
+WALK_STEP_M=0.15 \
+RGB_WIDTH=848 \
+RGB_HEIGHT=480 \
+RGB_SAMPLES=32 \
+SL_MAX_SAMPLES=128 \
+bash scripts/launch/capture_existing_seed_scene.sh \
+    outputs/benchmark/structured_light_indoors/seed_42 \
+    full
+```
+
+This mode:
+
+- reruns the whole-home trajectory into `trajectory_<RUN_TAG>/`
+- rerenders standard RGB into `seed_42_<RUN_TAG>_rgb/frames/`
+- keeps RGB `png + exr + camview` by default
+- renders structured-light outputs into `seed_42/sl_frames_<RUN_TAG>/structured_light/`
+
+### Main Knobs
+
+Important trajectory controls:
+
+- `WALK_CAMERA_HEIGHT_M`
+- `WALK_FPS`
+- `WALK_STEP_M`
+- `WALK_CLEARANCE_M`
+- `WALK_PATH_MARGIN_M`
+- `WALK_ROOM_SWEEP_ANGLE_DEG`
+- `WALK_ROOM_SWEEP_YAW_SPEED_DEG_S`
+- `WALK_ENABLE_ROOM_ORBIT`
+- `WALK_ROOM_GRID_STEP_M`
+- `WALK_FORCE_OPEN_ACCESS_DOORS`
+- `WALK_FORCE_OPEN_ACCESS_DOORS_MODE`
+
+Important RGB render controls:
+
+- `RGB_WIDTH`
+- `RGB_HEIGHT`
+- `RGB_SAMPLES`
+- `RGB_FORCE_LIGHTING`
+- `RGB_WORLD_STRENGTH`
+- `RGB_SUN_ENERGY`
+- `RGB_CAMERA_LIGHT_ENERGY`
+- `RGB_FORCE_DENOISING`
+- `RGB_DISABLE_CAUSTICS`
+- `RGB_SAMPLE_CLAMP_INDIRECT`
+- `RGB_SAMPLE_CLAMP_DIRECT`
+- `RGB_DELETE_EXR_AFTER_RENDER`
+
+Important structured-light controls:
+
+- `SL_MAX_SAMPLES`
+
+Operational controls:
+
+- `RUN_TAG` controls output folder suffixes
+- `REUSE_EXISTING_TRAJECTORY=1` reuses a previously generated trajectory scene
+- `FRAME_RANGE=start,end` reruns only a subset of frames for both RGB and structured-light modes
+- `RUN_RGB_RENDER_IN_FULL=0` skips standard RGB in `full` mode
+- `RUN_STRUCTURED_LIGHT_IN_FULL=0` skips structured-light in `full` mode
+- `GENERATE_PREVIEW_ARTIFACTS=0` disables contact sheet and gif generation
 
 ## Parallelism Guidance
 
