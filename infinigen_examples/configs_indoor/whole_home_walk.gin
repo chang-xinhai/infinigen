@@ -18,9 +18,10 @@ animate_whole_home_walk.room_center_search_angles = 12
 animate_whole_home_walk.start_room_semantics = ("living-room", "dining-room", "kitchen", "bedroom", "bathroom")
 animate_whole_home_walk.return_to_start_room = True
 
-animate_whole_home_walk.room_sweep_angle_deg = 300.0
+animate_whole_home_walk.room_sweep_angle_deg = 180.0
 animate_whole_home_walk.room_sweep_yaw_speed_deg_s = 40.0
 animate_whole_home_walk.enable_room_orbit = False
+animate_whole_home_walk.room_path_mode = "orthogonal"
 animate_whole_home_walk.room_orbit_min_room_radius_m = 1.2
 animate_whole_home_walk.room_orbit_radius_scale = 0.45
 animate_whole_home_walk.room_orbit_radius_min_m = 0.35
@@ -29,3 +30,5 @@ animate_whole_home_walk.room_orbit_radius_max_m = 0.9
 animate_whole_home_walk.traversal_pitch_deg = -4.0
 animate_whole_home_walk.sweep_pitch_deg = -2.0
 animate_whole_home_walk.traversal_lookahead_pts = 5
+animate_whole_home_walk.force_open_access_doors = True
+animate_whole_home_walk.force_open_access_doors_mode = "hide"

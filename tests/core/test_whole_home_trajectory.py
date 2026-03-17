@@ -7,6 +7,7 @@ from infinigen.core.placement.whole_home_trajectory import (
     RoomRecord,
     _door_anchor,
     _infer_portal_center,
+    _room_path_segment,
 )
 
 
@@ -56,3 +57,26 @@ def test_door_anchor_stays_inside_room_bounds():
     assert 0.2 <= anchor.y <= 5.8
     assert anchor.z == room.center.z
     assert anchor.x < door.center.x
+
+
+def test_room_path_segment_uses_orthogonal_turn_inside_room():
+    room = _room("living", (0.0, 0.0, 0.0), (8.0, 8.0, 3.0))
+    start = Vector((6.5, 6.5, 1.55))
+    end = Vector((2.0, 1.0, 1.55))
+
+    points = _room_path_segment(
+        room=room,
+        start=start,
+        end=end,
+        linear_step_m=0.5,
+        clearance_m=0.2,
+    )
+
+    assert len(points) >= 3
+    assert points[0] == start
+    assert points[-1] == end
+    turn_points = [p for p in points[1:-1] if p.x == end.x or p.y == end.y]
+    assert turn_points
+    mid = turn_points[0]
+    assert room.bbox_min.x + 0.2 <= mid.x <= room.bbox_max.x - 0.2
+    assert room.bbox_min.y + 0.2 <= mid.y <= room.bbox_max.y - 0.2

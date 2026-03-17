@@ -114,6 +114,26 @@ def _ensure_preview_lighting(
     )
 
 
+def _configure_preview_cycles(
+    *,
+    preview_force_denoising: bool,
+    preview_disable_caustics: bool,
+    preview_sample_clamp_indirect: float | None,
+    preview_sample_clamp_direct: float | None,
+):
+    scene = bpy.context.scene
+    cycles = scene.cycles
+    if preview_force_denoising:
+        cycles.use_denoising = True
+    if preview_disable_caustics:
+        cycles.caustics_reflective = False
+        cycles.caustics_refractive = False
+    if preview_sample_clamp_indirect is not None:
+        cycles.sample_clamp_indirect = float(preview_sample_clamp_indirect)
+    if preview_sample_clamp_direct is not None:
+        cycles.sample_clamp_direct = float(preview_sample_clamp_direct)
+
+
 def remove_translucency():
     # The asserts were added since these edge cases haven't appeared yet -Lahav
     for material in bpy.data.materials:
@@ -558,6 +578,10 @@ def render_image(
     preview_sun_rotation_deg=(55.0, 0.0, 35.0),
     preview_camera_light_energy=500.0,
     preview_camera_light_offset_m=(0.0, 0.0, 0.15),
+    preview_force_denoising=False,
+    preview_disable_caustics=False,
+    preview_sample_clamp_indirect=None,
+    preview_sample_clamp_direct=None,
     auto_adjust_sensor_to_resolution=True,
 ):
     tic = time.time()
@@ -642,6 +666,12 @@ def render_image(
         preview_sun_rotation_deg=tuple(preview_sun_rotation_deg),
         preview_camera_light_energy=preview_camera_light_energy,
         preview_camera_light_offset_m=tuple(preview_camera_light_offset_m),
+    )
+    _configure_preview_cycles(
+        preview_force_denoising=preview_force_denoising,
+        preview_disable_caustics=preview_disable_caustics,
+        preview_sample_clamp_indirect=preview_sample_clamp_indirect,
+        preview_sample_clamp_direct=preview_sample_clamp_direct,
     )
 
     # Render the scene

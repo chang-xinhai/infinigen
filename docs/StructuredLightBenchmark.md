@@ -180,6 +180,7 @@ Notes:
 
 - preview renders now auto-adjust camera sensor dimensions before saving camera parameters, so `320x240` runs can exit cleanly
 - reused indoor benchmark scenes may already have most scene lights deleted by the `coarse` pipeline, so `full/render_image.preview_force_lighting=True` is the intended verification-time fallback
+- the visible white speckle problem in old low-cost previews was not caused by `320x240` resolution itself; it came from low-sample Monte Carlo noise plus bright indirect transport, and the preview path now supports `full/render_image.preview_force_denoising=True`, `preview_disable_caustics=True`, and `preview_sample_clamp_*` overrides to control it
 
 ## Parallelism Guidance
 

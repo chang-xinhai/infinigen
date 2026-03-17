@@ -362,6 +362,56 @@ def _path_segment(
     return _resample_polyline([start, end], linear_step_m)
 
 
+def _interior_point(room: RoomRecord, point: Vector, clearance_m: float) -> Vector:
+    margin = max(clearance_m, 0.05)
+    return Vector(
+        (
+            _clamp(point.x, room.bbox_min.x + margin, room.bbox_max.x - margin),
+            _clamp(point.y, room.bbox_min.y + margin, room.bbox_max.y - margin),
+            room.center.z,
+        )
+    )
+
+
+def _room_path_segment(
+    room: RoomRecord,
+    start: Vector,
+    end: Vector,
+    linear_step_m: float,
+    clearance_m: float,
+) -> list[Vector]:
+    start = _interior_point(room, start, clearance_m)
+    end = _interior_point(room, end, clearance_m)
+    if (start - end).length < 1e-6:
+        return [start]
+
+    via_x = _interior_point(
+        room,
+        Vector((end.x, start.y, room.center.z)),
+        clearance_m,
+    )
+    via_y = _interior_point(
+        room,
+        Vector((start.x, end.y, room.center.z)),
+        clearance_m,
+    )
+
+    center = room.center
+    candidates = [
+        [start, via_x, end],
+        [start, via_y, end],
+    ]
+    candidates.sort(
+        key=lambda pts: sum((pts[i] - pts[i - 1]).length for i in range(1, len(pts)))
+        + 0.1 * (pts[1] - center).length
+    )
+    points = [candidates[0][0]]
+    for point in candidates[0][1:]:
+        if (point - points[-1]).length > 1e-6:
+            points.append(point)
+    return _resample_polyline(points, linear_step_m)
+
+
 def _door_anchor(
     door: DoorRecord,
     room: RoomRecord,
@@ -489,6 +539,42 @@ def _append_orbit_sweep(
         )
 
 
+def _collect_access_door_objects(doors: dict[str, DoorRecord]) -> set[bpy.types.Object]:
+    result: set[bpy.types.Object] = set()
+    factory_name_tokens = ("paneldoorfactory", "glasspaneldoorfactory")
+
+    for door in doors.values():
+        obj = bpy.data.objects.get(door.mesh_name)
+        if obj is None:
+            obj = bpy.data.objects.get(door.name)
+        if obj is not None:
+            result.add(obj)
+            result.update(obj.children_recursive)
+
+    for obj in bpy.data.objects:
+        name_l = obj.name.lower()
+        if any(token in name_l for token in factory_name_tokens):
+            result.add(obj)
+            result.update(obj.children_recursive)
+
+    return result
+
+
+def _force_open_access_doors(
+    doors: dict[str, DoorRecord],
+    mode: str,
+):
+    if mode == "none":
+        return
+
+    for obj in _collect_access_door_objects(doors):
+        if mode == "hide":
+            obj.hide_render = True
+            obj.hide_viewport = True
+        else:
+            raise WholeHomeWalkError(f"Unsupported force_open_access_doors_mode={mode}")
+
+
 def _serialize_sample(sample: dict, frame: int) -> dict:
     return {
         "frame": frame,
@@ -523,6 +609,7 @@ def animate_whole_home_walk(
     room_sweep_angle_deg: float = 300.0,
     room_sweep_yaw_speed_deg_s: float = 40.0,
     enable_room_orbit: bool = False,
+    room_path_mode: str = "orthogonal",
     room_orbit_min_room_radius_m: float = 1.2,
     room_orbit_radius_scale: float = 0.45,
     room_orbit_radius_min_m: float = 0.35,
@@ -530,6 +617,8 @@ def animate_whole_home_walk(
     traversal_pitch_deg: float = -4.0,
     sweep_pitch_deg: float = -2.0,
     traversal_lookahead_pts: int = 5,
+    force_open_access_doors: bool = True,
+    force_open_access_doors_mode: str = "hide",
 ):
     if not camera_rigs:
         raise WholeHomeWalkError("No camera rigs found in scene")
@@ -559,6 +648,12 @@ def animate_whole_home_walk(
     )
     if not rooms:
         raise WholeHomeWalkError("Failed to recover any rooms from solve_state / scene")
+
+    if force_open_access_doors:
+        _force_open_access_doors(
+            doors=doors,
+            mode=force_open_access_doors_mode,
+        )
 
     start_room = _choose_start_room(rooms, tuple(start_room_semantics))
     room_sequence = _dfs_room_sequence(
@@ -621,19 +716,37 @@ def animate_whole_home_walk(
         src_anchor = _door_anchor(door, rooms[src], door_offset_m, clearance_m=clearance_m)
         dst_anchor = _door_anchor(door, rooms[dst], door_offset_m, clearance_m=clearance_m)
 
-        seg_a = _path_segment(
-            start=rooms[src].center,
-            end=src_anchor,
-            linear_step_m=linear_step_m,
-        )
+        if room_path_mode == "orthogonal":
+            seg_a = _room_path_segment(
+                room=rooms[src],
+                start=rooms[src].center,
+                end=src_anchor,
+                linear_step_m=linear_step_m,
+                clearance_m=clearance_m,
+            )
+            seg_c = _room_path_segment(
+                room=rooms[dst],
+                start=dst_anchor,
+                end=rooms[dst].center,
+                linear_step_m=linear_step_m,
+                clearance_m=clearance_m,
+            )
+        elif room_path_mode == "straight":
+            seg_a = _path_segment(
+                start=rooms[src].center,
+                end=src_anchor,
+                linear_step_m=linear_step_m,
+            )
+            seg_c = _path_segment(
+                start=dst_anchor,
+                end=rooms[dst].center,
+                linear_step_m=linear_step_m,
+            )
+        else:
+            raise WholeHomeWalkError(f"Unsupported room_path_mode={room_path_mode}")
         seg_b = _path_segment(
             start=src_anchor,
             end=dst_anchor,
-            linear_step_m=linear_step_m,
-        )
-        seg_c = _path_segment(
-            start=dst_anchor,
-            end=rooms[dst].center,
             linear_step_m=linear_step_m,
         )
 
@@ -698,12 +811,15 @@ def animate_whole_home_walk(
         "room_sweep_angle_deg": room_sweep_angle_deg,
         "room_sweep_yaw_speed_deg_s": room_sweep_yaw_speed_deg_s,
         "enable_room_orbit": enable_room_orbit,
+        "room_path_mode": room_path_mode,
         "room_orbit_min_room_radius_m": room_orbit_min_room_radius_m,
         "room_orbit_radius_scale": room_orbit_radius_scale,
         "room_orbit_radius_min_m": room_orbit_radius_min_m,
         "room_orbit_radius_max_m": room_orbit_radius_max_m,
         "traversal_pitch_deg": traversal_pitch_deg,
         "sweep_pitch_deg": sweep_pitch_deg,
+        "force_open_access_doors": force_open_access_doors,
+        "force_open_access_doors_mode": force_open_access_doors_mode,
         "rooms": [
             {
                 "name": room.name,
