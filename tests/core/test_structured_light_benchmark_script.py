@@ -72,6 +72,12 @@ if [[ "$task" == "render" ]]; then
     exit 0
 fi
 
+if [[ "$task" == "trajectory" ]]; then
+    touch "$output_folder/scene.blend"
+    touch "$output_folder/trajectory_metadata.json"
+    exit 0
+fi
+
 if [[ "$task" == "structured_light" ]]; then
     mkdir -p "$output_folder/structured_light"
     touch "$output_folder/structured_light/done.txt"
@@ -117,4 +123,104 @@ exit 0
 
     assert (output_root / "seed_0/sl_frames/structured_light/done.txt").exists()
     assert (output_root / "seed_2/sl_frames/structured_light/done.txt").exists()
+    assert (output_root / "seed_0/trajectory/scene.blend").exists()
+    assert (output_root / "seed_2/trajectory/scene.blend").exists()
     assert "Skipping post-processing for seed=1" in result.stdout
+
+
+def test_benchmark_script_reuses_existing_coarse(tmp_path):
+    repo_root = infinigen.repo_root()
+    script_path = repo_root / "scripts/launch/structured_light_indoors_benchmark.sh"
+    fake_python = tmp_path / "fake_python_reuse.sh"
+    output_root = tmp_path / "benchmark_outputs_reuse"
+    coarse_dir = output_root / "seed_5" / "coarse"
+
+    coarse_dir.mkdir(parents=True, exist_ok=True)
+    (coarse_dir / "scene.blend").write_text("", encoding="utf-8")
+
+    fake_python.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+
+task=""
+output_folder=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -m)
+            shift 2
+            ;;
+        --task)
+            task="$2"
+            shift 2
+            ;;
+        --output_folder)
+            output_folder="$2"
+            shift 2
+            ;;
+        --input_folder)
+            shift 2
+            ;;
+        -g|-p)
+            shift
+            while [[ $# -gt 0 && "$1" != --* && "$1" != -g && "$1" != -p ]]; do
+                shift
+            done
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+mkdir -p "$output_folder"
+
+if [[ "$task" == "coarse" ]]; then
+    echo "coarse should not run when REUSE_EXISTING_COARSE=1" >&2
+    exit 99
+fi
+
+if [[ "$task" == "trajectory" ]]; then
+    touch "$output_folder/scene.blend"
+    touch "$output_folder/trajectory_metadata.json"
+    exit 0
+fi
+
+if [[ "$task" == "structured_light" ]]; then
+    mkdir -p "$output_folder/structured_light"
+    touch "$output_folder/structured_light/done.txt"
+    exit 0
+fi
+
+exit 0
+""",
+        encoding="utf-8",
+    )
+    fake_python.chmod(fake_python.stat().st_mode | stat.S_IEXEC)
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "NUM_SCENES": "1",
+            "SEED_START": "5",
+            "REUSE_EXISTING_COARSE": "1",
+            "PARALLEL_MODE": "off",
+            "RUN_STANDARD_RENDER": "0",
+            "OUTPUT_ROOT": str(output_root),
+            "PYTHON_BIN": str(fake_python),
+        }
+    )
+
+    result = subprocess.run(
+        ["bash", str(script_path)],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert (output_root / "seed_5/trajectory/scene.blend").exists()
+    assert (output_root / "seed_5/sl_frames/structured_light/done.txt").exists()
+    assert "Reusing existing coarse scene for seed=5" in result.stdout

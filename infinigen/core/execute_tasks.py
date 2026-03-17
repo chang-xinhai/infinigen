@@ -180,7 +180,6 @@ def group_collections(config):
 @gin.configurable
 def execute_tasks(
     compose_scene_func: typing.Callable,
-    populate_scene_func: typing.Callable,
     input_folder: Path,
     output_folder: Path,
     task: str,
@@ -195,6 +194,9 @@ def execute_tasks(
     dryrun=False,
     optimize_terrain_diskusage=False,
     point_trajectory_src_frame=1,
+    use_scene_frame_range=False,
+    populate_scene_func: typing.Callable = None,
+    trajectory_scene_func: typing.Callable = None,
 ):
     if input_folder != output_folder:
         if reset_assets:
@@ -224,6 +226,12 @@ def execute_tasks(
     if frame_range[1] < frame_range[0]:
         raise ValueError(
             f"{frame_range=} is invalid, frame range must be nonempty. Blender end frame is INCLUSIVE"
+        )
+
+    if use_scene_frame_range and Task.Coarse not in task:
+        frame_range = (
+            int(bpy.context.scene.frame_start),
+            int(bpy.context.scene.frame_end),
         )
 
     logger.info(
@@ -258,6 +266,14 @@ def execute_tasks(
     if Task.Populate in task and populate_scene_func is not None:
         populate_scene_func(output_folder, scene_seed, camera_rigs)
 
+    if Task.Trajectory in task and trajectory_scene_func is not None:
+        trajectory_scene_func(
+            input_folder=input_folder,
+            output_folder=output_folder,
+            scene_seed=scene_seed,
+            camera_rigs=camera_rigs,
+        )
+
     need_terrain_processing = "atmosphere" in bpy.data.objects
 
     if Task.FineTerrain in task and need_terrain_processing:
@@ -285,7 +301,12 @@ def execute_tasks(
                 mesh.endswith(".glb") or mesh.endswith(".b_displacement.npy")
             ) and not os.path.islink(output_folder / mesh):
                 os.symlink(input_folder / mesh, output_folder / mesh)
-    if Task.Coarse in task or Task.Populate in task or Task.FineTerrain in task:
+    if (
+        Task.Coarse in task
+        or Task.Trajectory in task
+        or Task.Populate in task
+        or Task.FineTerrain in task
+    ):
         with Timer("Writing output blendfile"):
             logging.info(
                 f"Writing output blendfile to {output_folder / output_blend_name}"

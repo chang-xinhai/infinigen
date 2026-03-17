@@ -37,6 +37,7 @@ from infinigen.core.constraints.example_solver import (
 from infinigen.core.constraints.example_solver.room import decorate as room_dec
 from infinigen.core.constraints.example_solver.solve import Solver
 from infinigen.core.placement import camera_trajectories as cam_traj
+from infinigen.core.placement.whole_home_trajectory import animate_whole_home_walk
 from infinigen.core.util import blender as butil
 from infinigen.core.util import camera as cam_util
 from infinigen.core.util import ocmesher_utils, pipeline
@@ -526,6 +527,7 @@ def main(args):
     execute_tasks.main(
         compose_scene_func=compose_indoors,
         populate_scene_func=None,
+        trajectory_scene_func=animate_whole_home_walk,
         input_folder=args.input_folder,
         output_folder=args.output_folder,
         task=args.task,
@@ -548,6 +550,7 @@ if __name__ == "__main__":
         default=["coarse"],
         choices=[
             "coarse",
+            "trajectory",
             "populate",
             "fine_terrain",
             "ground_truth",

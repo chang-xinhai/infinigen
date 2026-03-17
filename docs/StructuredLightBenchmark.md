@@ -5,6 +5,7 @@ This workflow is for generating a small set of indoor structured-light benchmark
 ## Files
 
 - `infinigen_examples/configs_indoor/benchmark.gin`
+- `infinigen_examples/configs_indoor/whole_home_walk.gin`
 - `scripts/launch/structured_light_indoors_benchmark.sh`
 
 ## What Changes Relative To The Fast Script
@@ -14,6 +15,7 @@ The benchmark config increases floor-plan search and object-placement optimizati
 The benchmark script also layers in:
 
 - `real_geometry_with_bump.gin` for richer room geometry
+- `whole_home_walk.gin` for whole-home camera trajectory planning on existing coarse scenes
 - optional `multistory.gin` when `ENABLE_MULTISTORY=1`
 - a batch loop over multiple seeds
 - log files under `OUTPUT_ROOT/logs/`
@@ -51,9 +53,14 @@ ROOM_TYPE=ALL \
 OUTPUT_ROOT=outputs/benchmark/structured_light_indoors \
 RUN_STANDARD_RENDER=0 \
 ENABLE_MULTISTORY=0 \
+ENABLE_WHOLE_HOME_WALK=1 \
+REUSE_EXISTING_COARSE=0 \
 PARALLEL_MODE=coarse_only \
 MAX_PARALLEL_SCENES=2 \
 SL_MAX_SAMPLES=128 \
+WALK_CAMERA_HEIGHT_M=1.55 \
+WALK_FPS=8 \
+WALK_STEP_M=0.05 \
 FAIL_ON_ANY_SEED_FAILURE=1 \
 bash scripts/launch/structured_light_indoors_benchmark.sh
 ```
@@ -63,6 +70,9 @@ Additional compatibility knobs:
 - `FAIL_ON_ANY_SEED_FAILURE=1` keeps processing all seeds but returns a non-zero exit code at the end if any seed failed
 - `FAIL_ON_ANY_SEED_FAILURE=0` keeps processing all seeds and returns success even when some seeds fail
 - `PYTHON_BIN=/path/to/python` overrides the Python executable used by the launch script
+- `ENABLE_WHOLE_HOME_WALK=1` inserts a `trajectory` stage between `coarse` and rendering
+- `REUSE_EXISTING_COARSE=1` skips scene generation for seeds that already have `coarse/scene.blend` and reuses those scenes for whole-home trajectory planning and rendering
+- `WALK_CAMERA_HEIGHT_M`, `WALK_FPS`, `WALK_STEP_M`, `WALK_CLEARANCE_M`, `WALK_PATH_MARGIN_M`, and `WALK_PATH_RESOLUTION` override the default whole-home walk planner hyperparameters without editing code
 
 The current benchmark gin uses this moderate-quality profile:
 
@@ -114,6 +124,8 @@ NUM_SCENES=10 ROOM_TYPE=Bedroom bash scripts/launch/structured_light_indoors_ben
 For each seed:
 
 - `coarse/scene.blend` stores the generated scene
+- `trajectory/scene.blend` stores the same scene with whole-home walking camera animation
+- `trajectory/trajectory_metadata.json` stores planner parameters, room order, and per-frame camera poses
 - `sl_frames/structured_light/` stores structured-light outputs
 - `frames/` is generated only when `RUN_STANDARD_RENDER=1`
 - `logs/seed_<N>_coarse.log` stores coarse-generation logs
@@ -122,6 +134,18 @@ For each seed:
 - `logs/benchmark_summary.tsv` stores per-seed `coarse` and `postprocess` status for the full batch
 
 When a seed fails during `coarse`, the benchmark script now keeps running the remaining seeds, marks the failed seed in `benchmark_summary.tsv`, and skips render / structured-light post-processing for that seed instead of aborting the entire batch immediately.
+
+When `ENABLE_WHOLE_HOME_WALK=1`, the script plans a whole-home trajectory from the generated or reused `coarse` scene first, writes the animated result under `trajectory/`, and renders standard RGB or structured-light data from that trajectory scene.
+
+If you already have benchmark scenes under `outputs/benchmark/structured_light_indoors/seed_<N>/coarse/scene.blend`, you can reuse them directly:
+
+```bash
+NUM_SCENES=1 \
+SEED_START=0 \
+REUSE_EXISTING_COARSE=1 \
+ENABLE_WHOLE_HOME_WALK=1 \
+bash scripts/launch/structured_light_indoors_benchmark.sh
+```
 
 ## Parallelism Guidance
 

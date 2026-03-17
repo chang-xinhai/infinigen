@@ -1,0 +1,30 @@
+execute_tasks.use_scene_frame_range = True
+
+animate_whole_home_walk.camera_rig_index = 0
+animate_whole_home_walk.use_existing_camera_rig_only = True
+
+animate_whole_home_walk.camera_height_m = 1.55
+animate_whole_home_walk.planner_fps = 8
+animate_whole_home_walk.traversal_speed_mps = 0.45
+animate_whole_home_walk.orbit_speed_mps = 0.25
+animate_whole_home_walk.traversal_point_step_m = 0.05
+animate_whole_home_walk.door_offset_m = 0.35
+animate_whole_home_walk.clearance_m = 0.20
+animate_whole_home_walk.path_margin_m = 0.18
+animate_whole_home_walk.path_resolution = 160000
+
+animate_whole_home_walk.room_center_search_radii_m = (0.0, 0.25, 0.5, 0.75)
+animate_whole_home_walk.room_center_search_angles = 12
+animate_whole_home_walk.start_room_semantics = ("living-room", "dining-room", "kitchen", "bedroom", "bathroom")
+animate_whole_home_walk.return_to_start_room = True
+
+animate_whole_home_walk.room_sweep_angle_deg = 300.0
+animate_whole_home_walk.room_sweep_yaw_speed_deg_s = 40.0
+animate_whole_home_walk.room_orbit_min_room_radius_m = 1.2
+animate_whole_home_walk.room_orbit_radius_scale = 0.45
+animate_whole_home_walk.room_orbit_radius_min_m = 0.35
+animate_whole_home_walk.room_orbit_radius_max_m = 0.9
+
+animate_whole_home_walk.traversal_pitch_deg = -4.0
+animate_whole_home_walk.sweep_pitch_deg = -2.0
+animate_whole_home_walk.traversal_lookahead_pts = 5

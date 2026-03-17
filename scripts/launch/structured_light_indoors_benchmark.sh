@@ -14,6 +14,8 @@
 #   OUTPUT_ROOT=outputs/benchmark/structured_light_indoors
 #   RUN_STANDARD_RENDER=0
 #   ENABLE_MULTISTORY=0
+#   ENABLE_WHOLE_HOME_WALK=1
+#   REUSE_EXISTING_COARSE=0
 #   PARALLEL_MODE=coarse_only
 #   MAX_PARALLEL_SCENES=2
 #   SL_MAX_SAMPLES=128
@@ -27,18 +29,35 @@ OUTPUT_ROOT="${OUTPUT_ROOT:-${4:-outputs/benchmark/structured_light_indoors}}"
 
 RUN_STANDARD_RENDER="${RUN_STANDARD_RENDER:-0}"
 ENABLE_MULTISTORY="${ENABLE_MULTISTORY:-0}"
+ENABLE_WHOLE_HOME_WALK="${ENABLE_WHOLE_HOME_WALK:-1}"
+REUSE_EXISTING_COARSE="${REUSE_EXISTING_COARSE:-0}"
 PARALLEL_MODE="${PARALLEL_MODE:-coarse_only}"
 MAX_PARALLEL_SCENES="${MAX_PARALLEL_SCENES:-10}"
 FAIL_ON_ANY_SEED_FAILURE="${FAIL_ON_ANY_SEED_FAILURE:-1}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 
 SL_MAX_SAMPLES="${SL_MAX_SAMPLES:-128}"
+WALK_CAMERA_HEIGHT_M="${WALK_CAMERA_HEIGHT_M:-1.55}"
+WALK_FPS="${WALK_FPS:-8}"
+WALK_STEP_M="${WALK_STEP_M:-0.05}"
+WALK_CLEARANCE_M="${WALK_CLEARANCE_M:-0.20}"
+WALK_PATH_MARGIN_M="${WALK_PATH_MARGIN_M:-0.18}"
+WALK_PATH_RESOLUTION="${WALK_PATH_RESOLUTION:-160000}"
 
 COARSE_CONFIGS=(benchmark.gin real_geometry_with_bump.gin)
-RENDER_CONFIGS=(benchmark.gin real_geometry_with_bump.gin)
-SL_CONFIGS=(benchmark.gin real_geometry_with_bump.gin structured_light.gin)
+TRAJECTORY_CONFIGS=(benchmark.gin real_geometry_with_bump.gin whole_home_walk.gin)
+RENDER_CONFIGS=(benchmark.gin real_geometry_with_bump.gin whole_home_walk.gin)
+SL_CONFIGS=(benchmark.gin real_geometry_with_bump.gin whole_home_walk.gin structured_light.gin)
 
 COMMON_OVERRIDES=("compose_indoors.terrain_enabled=False")
+TRAJECTORY_OVERRIDES=(
+    "animate_whole_home_walk.camera_height_m=${WALK_CAMERA_HEIGHT_M}"
+    "animate_whole_home_walk.planner_fps=${WALK_FPS}"
+    "animate_whole_home_walk.traversal_point_step_m=${WALK_STEP_M}"
+    "animate_whole_home_walk.clearance_m=${WALK_CLEARANCE_M}"
+    "animate_whole_home_walk.path_margin_m=${WALK_PATH_MARGIN_M}"
+    "animate_whole_home_walk.path_resolution=${WALK_PATH_RESOLUTION}"
+)
 
 SL_OVERRIDES=(
     "render_structured_light.sl_max_samples=${SL_MAX_SAMPLES}"
@@ -55,17 +74,23 @@ declare -a ACTIVE_COARSE_SEEDS=()
 
 if [[ "${ENABLE_MULTISTORY}" == "1" ]]; then
     COARSE_CONFIGS+=(multistory.gin)
-    RENDER_CONFIGS+=(multistory.gin)
-    SL_CONFIGS=(benchmark.gin real_geometry_with_bump.gin multistory.gin structured_light.gin)
+    TRAJECTORY_CONFIGS+=(multistory.gin)
+    RENDER_CONFIGS=(benchmark.gin real_geometry_with_bump.gin multistory.gin whole_home_walk.gin)
+    SL_CONFIGS=(benchmark.gin real_geometry_with_bump.gin multistory.gin whole_home_walk.gin structured_light.gin)
 fi
 
 if [[ -n "${ROOM_TYPE}" && "${ROOM_TYPE}" != "ALL" ]]; then
     COARSE_CONFIGS+=(singleroom.gin)
-    RENDER_CONFIGS+=(singleroom.gin)
+    TRAJECTORY_CONFIGS+=(singleroom.gin)
     if [[ "${ENABLE_MULTISTORY}" == "1" ]]; then
-        SL_CONFIGS=(benchmark.gin real_geometry_with_bump.gin multistory.gin singleroom.gin structured_light.gin)
+        RENDER_CONFIGS=(benchmark.gin real_geometry_with_bump.gin multistory.gin singleroom.gin whole_home_walk.gin)
     else
-        SL_CONFIGS=(benchmark.gin real_geometry_with_bump.gin singleroom.gin structured_light.gin)
+        RENDER_CONFIGS=(benchmark.gin real_geometry_with_bump.gin singleroom.gin whole_home_walk.gin)
+    fi
+    if [[ "${ENABLE_MULTISTORY}" == "1" ]]; then
+        SL_CONFIGS=(benchmark.gin real_geometry_with_bump.gin multistory.gin singleroom.gin whole_home_walk.gin structured_light.gin)
+    else
+        SL_CONFIGS=(benchmark.gin real_geometry_with_bump.gin singleroom.gin whole_home_walk.gin structured_light.gin)
     fi
     COMMON_OVERRIDES+=("restrict_solving.restrict_parent_rooms=[\"${ROOM_TYPE}\"]")
     SCENE_SCOPE="single-room (${ROOM_TYPE})"
@@ -80,9 +105,14 @@ echo "  Seed start: ${SEED_START}"
 echo "  Scope: ${SCENE_SCOPE}"
 echo "  Output root: ${OUTPUT_ROOT}"
 echo "  Multistory: ${ENABLE_MULTISTORY}"
+echo "  Whole-home walk: ${ENABLE_WHOLE_HOME_WALK}"
+echo "  Reuse existing coarse: ${REUSE_EXISTING_COARSE}"
 echo "  Parallel mode: ${PARALLEL_MODE}"
 echo "  Max parallel scenes: ${MAX_PARALLEL_SCENES}"
 echo "  SL max samples: ${SL_MAX_SAMPLES}"
+echo "  Walk camera height: ${WALK_CAMERA_HEIGHT_M}"
+echo "  Walk fps: ${WALK_FPS}"
+echo "  Walk step: ${WALK_STEP_M}"
 echo "  Fail on any seed failure: ${FAIL_ON_ANY_SEED_FAILURE}"
 echo "═══════════════════════════════════════════════════════════"
 
@@ -98,34 +128,67 @@ run_coarse() {
         -p "${COMMON_OVERRIDES[@]}"
 }
 
-run_render_and_sl() {
+run_trajectory() {
     local seed="$1"
     local output_dir="$2"
 
+    "${PYTHON_BIN}" -m infinigen_examples.generate_indoors \
+        --seed "${seed}" \
+        --task trajectory \
+        --input_folder "${output_dir}/coarse" \
+        --output_folder "${output_dir}/trajectory" \
+        -g "${TRAJECTORY_CONFIGS[@]}" \
+        -p "${COMMON_OVERRIDES[@]}" "${TRAJECTORY_OVERRIDES[@]}"
+}
+
+run_render_and_sl() {
+    local seed="$1"
+    local output_dir="$2"
+    local render_input="${output_dir}/coarse"
+
+    if [[ "${ENABLE_WHOLE_HOME_WALK}" == "1" ]]; then
+        echo ""
+        echo ">>> Step 2/4: Planning whole-home walk trajectory ..."
+        run_trajectory "${seed}" "${output_dir}"
+        render_input="${output_dir}/trajectory"
+    fi
+
     if [[ "${RUN_STANDARD_RENDER}" == "1" ]]; then
         echo ""
-        echo ">>> Step 2/3: Rendering standard RGB ..."
+        echo ">>> Step 3/4: Rendering standard RGB ..."
         "${PYTHON_BIN}" -m infinigen_examples.generate_indoors \
             --seed "${seed}" \
             --task render \
-            --input_folder "${output_dir}/coarse" \
+            --input_folder "${render_input}" \
             --output_folder "${output_dir}/frames" \
             -g "${RENDER_CONFIGS[@]}" \
             -p "${COMMON_OVERRIDES[@]}"
     else
         echo ""
-        echo ">>> Step 2/3: Skipped standard RGB render (RUN_STANDARD_RENDER=0)"
+        echo ">>> Step 3/4: Skipped standard RGB render (RUN_STANDARD_RENDER=0)"
     fi
 
     echo ""
-    echo ">>> Step 3/3: Rendering structured light ..."
+    echo ">>> Step 4/4: Rendering structured light ..."
     "${PYTHON_BIN}" -m infinigen_examples.generate_indoors \
         --seed "${seed}" \
         --task structured_light \
-        --input_folder "${output_dir}/coarse" \
+        --input_folder "${render_input}" \
         --output_folder "${output_dir}/sl_frames" \
         -g "${SL_CONFIGS[@]}" \
         -p "${COMMON_OVERRIDES[@]}" "${SL_OVERRIDES[@]}"
+}
+
+mark_existing_or_pending_coarse() {
+    local seed="$1"
+    local output_dir="$2"
+    if [[ "${REUSE_EXISTING_COARSE}" == "1" && -f "${output_dir}/coarse/scene.blend" ]]; then
+        COARSE_STATUS["${seed}"]="success"
+        POST_STATUS["${seed}"]="pending"
+        echo "Reusing existing coarse scene for seed=${seed} at ${output_dir}/coarse/scene.blend"
+        return 0
+    fi
+    return 1
 }
 
 collect_finished_coarse_jobs() {
@@ -256,6 +319,7 @@ write_summary() {
     echo "  Post failed: ${post_failed}"
     echo "  Post skipped: ${post_skipped}"
     echo "  Scene file: seed_<N>/coarse/scene.blend"
+    echo "  Trajectory file: seed_<N>/trajectory/scene.blend"
     echo "  SL output: seed_<N>/sl_frames/structured_light/"
     echo "═══════════════════════════════════════════════════════════"
 
@@ -269,17 +333,21 @@ if [[ "${PARALLEL_MODE}" == "coarse_only" ]]; then
         SEED=$((SEED_START + i))
         OUTPUT_DIR="${OUTPUT_ROOT}/seed_${SEED}"
         LOG_FILE="${LOG_ROOT}/seed_${SEED}_coarse.log"
-        COARSE_STATUS["${SEED}"]="running"
-        POST_STATUS["${SEED}"]="pending"
 
         mkdir -p "${OUTPUT_DIR}"
+        if mark_existing_or_pending_coarse "${SEED}" "${OUTPUT_DIR}"; then
+            continue
+        fi
+
+        COARSE_STATUS["${SEED}"]="running"
+        POST_STATUS["${SEED}"]="pending"
         echo ""
         echo "-----------------------------------------------------------"
         echo "Benchmark scene $((i + 1))/${NUM_SCENES}  seed=${SEED}"
         echo "Output: ${OUTPUT_DIR}"
         echo "Coarse log: ${LOG_FILE}"
         echo "-----------------------------------------------------------"
-        echo ">>> Step 1/3: Queueing benchmark indoor scene generation ..."
+        echo ">>> Step 1/4: Queueing benchmark indoor scene generation ..."
 
         wait_for_slot
         (
@@ -319,10 +387,15 @@ elif [[ "${PARALLEL_MODE}" == "off" ]]; then
         SEED=$((SEED_START + i))
         OUTPUT_DIR="${OUTPUT_ROOT}/seed_${SEED}"
         LOG_FILE="${LOG_ROOT}/seed_${SEED}.log"
-        COARSE_STATUS["${SEED}"]="running"
-        POST_STATUS["${SEED}"]="pending"
 
         mkdir -p "${OUTPUT_DIR}"
+        if mark_existing_or_pending_coarse "${SEED}" "${OUTPUT_DIR}"; then
+            run_postprocess_with_status "${SEED}" "${OUTPUT_DIR}" "${LOG_FILE}"
+            continue
+        fi
+
+        COARSE_STATUS["${SEED}"]="running"
+        POST_STATUS["${SEED}"]="pending"
         echo ""
         echo "-----------------------------------------------------------"
         echo "Benchmark scene $((i + 1))/${NUM_SCENES}  seed=${SEED}"
@@ -332,7 +405,7 @@ elif [[ "${PARALLEL_MODE}" == "off" ]]; then
 
         set +e
         (
-            echo ">>> Step 1/3: Generating benchmark indoor scene ..."
+            echo ">>> Step 1/4: Generating benchmark indoor scene ..."
             run_coarse "${SEED}" "${OUTPUT_DIR}"
             run_render_and_sl "${SEED}" "${OUTPUT_DIR}"
         ) >"${LOG_FILE}" 2>&1
