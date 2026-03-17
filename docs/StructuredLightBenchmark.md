@@ -147,6 +147,19 @@ ENABLE_WHOLE_HOME_WALK=1 \
 bash scripts/launch/structured_light_indoors_benchmark.sh
 ```
 
+Low-cost validation example against an existing benchmark scene:
+
+1. Copy `outputs/benchmark/structured_light_indoors/seed_0/coarse` to a temporary directory.
+2. Run the `trajectory` task in `infinigen_311` with reduced planner settings such as `planner_fps=1`, `room_sweep_angle_deg=30`, and `traversal_point_step_m=0.8`.
+3. Run `structured_light` from the generated `trajectory/scene.blend` with:
+   - `execute_tasks.use_scene_frame_range=False`
+   - `execute_tasks.frame_range=[1,1]` or `[1,2]`
+   - low `sl_resolution_*`
+   - `sl_max_samples=1`
+   - a minimal `sl_pattern_dir` containing `white.png` and one pattern file
+
+On the current machine this produces valid structured-light outputs, but Blender may still segfault during shutdown after the render completes. Treat the presence of expected files under `sl_frames/structured_light/` as the success condition for this temporary validation workflow.
+
 ## Parallelism Guidance
 
 `coarse` generation is primarily Python solver work plus Blender scene construction, so it benefits from CPU-side parallelism. Structured-light rendering uses Blender Cycles with `scene.cycles.device = "GPU"` and should usually remain single-scene on a single-GPU workstation.

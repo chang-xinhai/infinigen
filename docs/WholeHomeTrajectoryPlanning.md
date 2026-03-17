@@ -7,6 +7,14 @@ Implementation status in this repository:
 - a new `trajectory` task can animate an existing indoor `coarse/scene.blend`
 - whole-home walk hyperparameters are exposed in `infinigen_examples/configs_indoor/whole_home_walk.gin`
 - the benchmark launch script can reuse existing `coarse` scenes and render from the animated `trajectory` scene
+- the currently validated runtime implementation uses `doorway_straight_segments` as its navigation realization mode instead of the heavier scene-wide BVH pathfinder
+
+Validation status:
+
+- validated on an existing benchmark scene copied from `outputs/benchmark/structured_light_indoors/seed_0/coarse`
+- trajectory planning completed successfully in `infinigen_311` and wrote `trajectory/scene.blend` plus `trajectory_metadata.json`
+- structured-light rendering wrote complete low-resolution outputs for both 2-frame and 1-frame checks under `/tmp/whole_home_walk_e2e/seed_0/`
+- the current `infinigen_311 + bpy` runtime still segfaults on shutdown after rendering completes, but the structured-light outputs are already present on disk when that happens
 
 It is written for the current repository state where:
 
@@ -550,9 +558,13 @@ It is a hierarchical planner with:
 
 - room-graph traversal for global order
 - room-specific coverage motifs for local completeness
-- free-space shortest-path realization for physical plausibility
+- free-space path realization for physical plausibility
 - reconstruction-oriented frame scoring for view usefulness
 
 If we need one sentence for the implementation direction, it is:
 
 Use a deterministic room-graph coverage walk with doorway-aware shortest paths and per-room center-orbit sweeps, then resample and smooth it into an Infinigen camera animation at controlled walking height and informative frame spacing.
+
+Current implementation note:
+
+The validated implementation currently realizes transitions as doorway-anchored straight segments with metric resampling. Scene-wide obstacle-aware BVH pathfinding remains a follow-up improvement once the heavier runtime path can be stabilized for benchmark scenes without causing memory pressure in this environment.

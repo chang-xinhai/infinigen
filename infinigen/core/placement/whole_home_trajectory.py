@@ -11,10 +11,7 @@ import bpy
 import gin
 import numpy as np
 from mathutils import Euler, Vector
-from mathutils.bvhtree import BVHTree
 
-from infinigen.core.placement.camera import build_bvh_and_attrs
-from infinigen.core.placement.path_finding import path_finding
 from infinigen.core.util import blender as butil
 
 logger = logging.getLogger(__name__)
@@ -64,16 +61,6 @@ def _resample_polyline(points: list[Vector], step: float) -> list[Vector]:
 def _clear_animation(obj: bpy.types.Object):
     if obj.animation_data is not None:
         obj.animation_data_clear()
-
-
-def _mesh_objects():
-    return [
-        obj
-        for obj in bpy.data.objects
-        if obj.type == "MESH"
-        and not obj.hide_render
-        and "atmosphere" not in obj.name.lower()
-    ]
 
 
 @dataclass
@@ -130,23 +117,6 @@ def _bounds(obj: bpy.types.Object):
     return bounds.min(axis=0), bounds.max(axis=0)
 
 
-def _point_inside_room(room_obj: bpy.types.Object, point: Vector) -> bool:
-    deps = bpy.context.evaluated_depsgraph_get()
-    bvh = BVHTree.FromObject(room_obj, deps)
-    up = bvh.ray_cast(point, Vector((0, 0, 1)))
-    down = bvh.ray_cast(point, Vector((0, 0, -1)))
-    return up[0] is not None and down[0] is not None
-
-
-def _point_has_clearance(point: Vector, scene_bvh: BVHTree, clearance: float) -> bool:
-    for angle in np.linspace(0.0, 2.0 * np.pi, 12, endpoint=False):
-        direction = Vector((math.cos(angle), math.sin(angle), 0.0))
-        hit = scene_bvh.ray_cast(point, direction, clearance)
-        if hit[0] is not None:
-            return False
-    return True
-
-
 def _candidate_ring(center: Vector, radii: tuple[float, ...], samples: int) -> list[Vector]:
     candidates = [center.copy()]
     for radius in radii:
@@ -166,16 +136,18 @@ def _candidate_ring(center: Vector, radii: tuple[float, ...], samples: int) -> l
 def _pick_room_anchor(
     room_obj: bpy.types.Object,
     initial_center: Vector,
-    scene_bvh: BVHTree,
-    clearance: float,
     search_radii: tuple[float, ...],
     search_angles: int,
 ) -> Vector:
+    bbox_min, bbox_max = _bounds(room_obj)
+    margin_x = max(0.05, 0.1 * (bbox_max[0] - bbox_min[0]))
+    margin_y = max(0.05, 0.1 * (bbox_max[1] - bbox_min[1]))
     for candidate in _candidate_ring(initial_center, search_radii, search_angles):
-        if not _point_inside_room(room_obj, candidate):
+        if not (bbox_min[0] + margin_x <= candidate.x <= bbox_max[0] - margin_x):
             continue
-        if not _point_has_clearance(candidate, scene_bvh, clearance):
+        if not (bbox_min[1] + margin_y <= candidate.y <= bbox_max[1] - margin_y):
             continue
+        candidate.z = initial_center.z
         return candidate
     return initial_center
 
@@ -183,8 +155,6 @@ def _pick_room_anchor(
 def _extract_graph(
     scene_folder: Path,
     camera_height_m: float,
-    scene_bvh: BVHTree,
-    clearance: float,
     center_search_radii_m: tuple[float, ...],
     center_search_angles: int,
 ) -> tuple[dict[str, RoomRecord], dict[str, DoorRecord], dict[str, set[str]]]:
@@ -214,8 +184,6 @@ def _extract_graph(
         center = _pick_room_anchor(
             room_obj=room_obj,
             initial_center=center,
-            scene_bvh=scene_bvh,
-            clearance=clearance,
             search_radii=center_search_radii_m,
             search_angles=center_search_angles,
         )
@@ -343,30 +311,9 @@ def _dfs_room_sequence(
 def _path_segment(
     start: Vector,
     end: Vector,
-    scene_bvh: BVHTree,
-    house_bbox: tuple[np.ndarray, np.ndarray],
-    path_resolution: int,
-    path_margin: float,
     linear_step_m: float,
 ) -> list[Vector]:
-    start_pose = (start.copy(), Euler((0.0, 0.0, 0.0)))
-    end_pose = (end.copy(), Euler((0.0, 0.0, 0.0)))
-    poses = path_finding(
-        scene_bvh,
-        house_bbox,
-        start_pose,
-        end_pose,
-        resolution=path_resolution,
-        margin=path_margin,
-    )
-    if poses is None:
-        straight = end - start
-        hit = scene_bvh.ray_cast(start, straight, straight.length)
-        if hit[0] is not None:
-            raise WholeHomeWalkError("Pathfinding failed and straight line was blocked")
-        return _resample_polyline([start, end], linear_step_m)
-    points = [pose[1].copy() for pose in poses]
-    return _resample_polyline(points, linear_step_m)
+    return _resample_polyline([start, end], linear_step_m)
 
 
 def _door_anchor(
@@ -553,20 +500,9 @@ def animate_whole_home_walk(
             expected_step_m,
         )
 
-    scene_objs = _mesh_objects()
-    if not scene_objs:
-        raise WholeHomeWalkError("No mesh objects available for whole-home path planning")
-    scene_bvh, _ = build_bvh_and_attrs(scene_objs, [])
-    all_bounds = np.concatenate([np.array(butil.bounds(obj)) for obj in scene_objs], axis=0)
-    bbox_min = all_bounds.min(axis=0) - np.array([0.5, 0.5, 0.1])
-    bbox_max = all_bounds.max(axis=0) + np.array([0.5, 0.5, 0.1])
-    house_bbox = (bbox_min, bbox_max)
-
     rooms, doors, adjacency = _extract_graph(
         scene_folder=Path(input_folder),
         camera_height_m=camera_height_m,
-        scene_bvh=scene_bvh,
-        clearance=clearance_m,
         center_search_radii_m=tuple(room_center_search_radii_m),
         center_search_angles=room_center_search_angles,
     )
@@ -637,28 +573,16 @@ def animate_whole_home_walk(
         seg_a = _path_segment(
             start=rooms[src].center,
             end=src_anchor,
-            scene_bvh=scene_bvh,
-            house_bbox=house_bbox,
-            path_resolution=path_resolution,
-            path_margin=path_margin_m,
             linear_step_m=linear_step_m,
         )
         seg_b = _path_segment(
             start=src_anchor,
             end=dst_anchor,
-            scene_bvh=scene_bvh,
-            house_bbox=house_bbox,
-            path_resolution=max(path_resolution // 2, 40000),
-            path_margin=max(path_margin_m * 0.5, 0.05),
             linear_step_m=linear_step_m,
         )
         seg_c = _path_segment(
             start=dst_anchor,
             end=rooms[dst].center,
-            scene_bvh=scene_bvh,
-            house_bbox=house_bbox,
-            path_resolution=path_resolution,
-            path_margin=path_margin_m,
             linear_step_m=linear_step_m,
         )
 
@@ -707,6 +631,7 @@ def animate_whole_home_walk(
 
     metadata = {
         "planner": "whole_home_walk",
+        "navigation_mode": "doorway_straight_segments",
         "scene_seed": scene_seed,
         "planner_fps": planner_fps,
         "frame_start": scene.frame_start,
