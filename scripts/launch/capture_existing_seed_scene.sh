@@ -225,6 +225,9 @@ images = sorted(img_dir.glob("Image_0_0_*.png"))
 if not images:
     raise SystemExit(f"No RGB png frames found under {img_dir}")
 
+first_frame = Image.open(images[0]).convert("RGB")
+first_frame.save(root / "rgb_first_frame.png")
+
 contact_indices = [round(i * (len(images) - 1) / 15) for i in range(16)]
 contact_paths = [images[i] for i in contact_indices]
 thumbs = []

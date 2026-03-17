@@ -214,7 +214,7 @@ This validated run writes:
 - `372` RGB pngs under `outputs/benchmark/structured_light_indoors/seed_0_rgb_v11/frames/Image/camera_0/`
 - `372` RGB exrs under the same directory
 - `372` camera parameter files under `outputs/benchmark/structured_light_indoors/seed_0_rgb_v11/frames/camview/camera_0/`
-- review artifacts such as `rgb_contact_sheet.png` and `rgb_preview_stride4.gif` under `outputs/benchmark/structured_light_indoors/seed_0_rgb_v11/`
+- review artifacts such as `rgb_first_frame.png`, `rgb_contact_sheet.png`, and `rgb_preview_stride4.gif` under `outputs/benchmark/structured_light_indoors/seed_0_rgb_v11/`
 
 ## Existing Seed Scene Capture
 
@@ -254,7 +254,7 @@ This mode:
 - writes trajectory outputs to `outputs/benchmark/structured_light_indoors/seed_42/trajectory_<RUN_TAG>/`
 - writes RGB outputs to `outputs/benchmark/structured_light_indoors/seed_42_<RUN_TAG>_rgb/frames/`
 - deletes RGB `exr` files by default so the final RGB directory only keeps `png` frames plus camera metadata
-- writes `rgb_contact_sheet.png` and `rgb_preview_stride*.gif` for quick inspection
+- writes `rgb_first_frame.png`, `rgb_contact_sheet.png`, and `rgb_preview_stride*.gif` for quick inspection
 
 ### Full
 
