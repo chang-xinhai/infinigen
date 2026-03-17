@@ -71,6 +71,8 @@ class RoomRecord:
     area: float
     center: Vector
     floor_z: float
+    bbox_min: Vector
+    bbox_max: Vector
 
 
 @dataclass
@@ -194,6 +196,8 @@ def _extract_graph(
             area=float((bbox_max[0] - bbox_min[0]) * (bbox_max[1] - bbox_min[1])),
             center=center,
             floor_z=floor_z,
+            bbox_min=Vector(tuple(float(v) for v in bbox_min)),
+            bbox_max=Vector(tuple(float(v) for v in bbox_max)),
         )
 
     for name, rec in state.items():
@@ -214,14 +218,10 @@ def _extract_graph(
         if door_obj is None:
             logger.warning("Failed to resolve door object for %s (%s)", name, mesh_name)
             continue
-        bbox_min, bbox_max = _bounds(door_obj)
-        room_floor = min(rooms[room].floor_z for room in connected_rooms)
-        center = Vector(
-            (
-                float((bbox_min[0] + bbox_max[0]) * 0.5),
-                float((bbox_min[1] + bbox_max[1]) * 0.5),
-                room_floor + camera_height_m,
-            )
+        center = _infer_portal_center(
+            rooms[connected_rooms[0]],
+            rooms[connected_rooms[1]],
+            camera_height_m=camera_height_m,
         )
         doors[name] = DoorRecord(
             name=name,
@@ -236,6 +236,52 @@ def _extract_graph(
                 adjacency[src].add(dst)
 
     return rooms, doors, adjacency
+
+
+def _interval_overlap(a_min: float, a_max: float, b_min: float, b_max: float) -> tuple[float, float, float]:
+    lo = max(a_min, b_min)
+    hi = min(a_max, b_max)
+    return lo, hi, max(0.0, hi - lo)
+
+
+def _midpoint_or_average(lo: float, hi: float, fallback_a: float, fallback_b: float) -> float:
+    if hi >= lo:
+        return 0.5 * (lo + hi)
+    return 0.5 * (fallback_a + fallback_b)
+
+
+def _infer_portal_center(
+    src_room: RoomRecord,
+    dst_room: RoomRecord,
+    camera_height_m: float,
+) -> Vector:
+    x_lo, x_hi, x_overlap = _interval_overlap(
+        float(src_room.bbox_min.x),
+        float(src_room.bbox_max.x),
+        float(dst_room.bbox_min.x),
+        float(dst_room.bbox_max.x),
+    )
+    y_lo, y_hi, y_overlap = _interval_overlap(
+        float(src_room.bbox_min.y),
+        float(src_room.bbox_max.y),
+        float(dst_room.bbox_min.y),
+        float(dst_room.bbox_max.y),
+    )
+
+    if x_overlap >= y_overlap:
+        center_x = _midpoint_or_average(x_lo, x_hi, src_room.center.x, dst_room.center.x)
+        if src_room.center.y <= dst_room.center.y:
+            boundary_y = 0.5 * (float(src_room.bbox_max.y) + float(dst_room.bbox_min.y))
+        else:
+            boundary_y = 0.5 * (float(src_room.bbox_min.y) + float(dst_room.bbox_max.y))
+        return Vector((center_x, boundary_y, min(src_room.floor_z, dst_room.floor_z) + camera_height_m))
+
+    center_y = _midpoint_or_average(y_lo, y_hi, src_room.center.y, dst_room.center.y)
+    if src_room.center.x <= dst_room.center.x:
+        boundary_x = 0.5 * (float(src_room.bbox_max.x) + float(dst_room.bbox_min.x))
+    else:
+        boundary_x = 0.5 * (float(src_room.bbox_min.x) + float(dst_room.bbox_max.x))
+    return Vector((boundary_x, center_y, min(src_room.floor_z, dst_room.floor_z) + camera_height_m))
 
 
 def _choose_start_room(rooms: dict[str, RoomRecord], start_room_semantics: tuple[str, ...]) -> str:
@@ -320,6 +366,7 @@ def _door_anchor(
     door: DoorRecord,
     room: RoomRecord,
     offset_m: float,
+    clearance_m: float,
 ) -> Vector:
     direction = room.center - door.center
     direction.z = 0.0
@@ -328,6 +375,9 @@ def _door_anchor(
     direction.normalize()
     anchor = door.center.copy()
     anchor += direction * offset_m
+    margin = max(clearance_m, 0.05)
+    anchor.x = _clamp(anchor.x, room.bbox_min.x + margin, room.bbox_max.x - margin)
+    anchor.y = _clamp(anchor.y, room.bbox_min.y + margin, room.bbox_max.y - margin)
     anchor.z = room.center.z
     return anchor
 
@@ -428,7 +478,7 @@ def _append_orbit_sweep(
                 center.z,
             )
         )
-        target = location + Vector((math.cos(phase), math.sin(phase), 0.0))
+        target = center.copy()
         samples.append(
             {
                 "location": location,
@@ -472,6 +522,7 @@ def animate_whole_home_walk(
     return_to_start_room: bool = True,
     room_sweep_angle_deg: float = 300.0,
     room_sweep_yaw_speed_deg_s: float = 40.0,
+    enable_room_orbit: bool = False,
     room_orbit_min_room_radius_m: float = 1.2,
     room_orbit_radius_scale: float = 0.45,
     room_orbit_radius_min_m: float = 0.35,
@@ -534,7 +585,7 @@ def animate_whole_home_walk(
             max_radius=room_orbit_radius_max_m,
             radius_scale=room_orbit_radius_scale,
         )
-        if wall_clearance >= room_orbit_min_room_radius_m:
+        if enable_room_orbit and wall_clearance >= room_orbit_min_room_radius_m:
             _append_orbit_sweep(
                 samples=samples,
                 center=room.center,
@@ -567,8 +618,8 @@ def animate_whole_home_walk(
         if src == dst:
             continue
         door = _choose_door(doors, rooms, src, dst)
-        src_anchor = _door_anchor(door, rooms[src], door_offset_m)
-        dst_anchor = _door_anchor(door, rooms[dst], door_offset_m)
+        src_anchor = _door_anchor(door, rooms[src], door_offset_m, clearance_m=clearance_m)
+        dst_anchor = _door_anchor(door, rooms[dst], door_offset_m, clearance_m=clearance_m)
 
         seg_a = _path_segment(
             start=rooms[src].center,
@@ -646,6 +697,7 @@ def animate_whole_home_walk(
         "path_resolution": path_resolution,
         "room_sweep_angle_deg": room_sweep_angle_deg,
         "room_sweep_yaw_speed_deg_s": room_sweep_yaw_speed_deg_s,
+        "enable_room_orbit": enable_room_orbit,
         "room_orbit_min_room_radius_m": room_orbit_min_room_radius_m,
         "room_orbit_radius_scale": room_orbit_radius_scale,
         "room_orbit_radius_min_m": room_orbit_radius_min_m,

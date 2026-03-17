@@ -8,11 +8,14 @@ Implementation status in this repository:
 - whole-home walk hyperparameters are exposed in `infinigen_examples/configs_indoor/whole_home_walk.gin`
 - the benchmark launch script can reuse existing `coarse` scenes and render from the animated `trajectory` scene
 - the currently validated runtime implementation uses `doorway_straight_segments` as its navigation realization mode instead of the heavier scene-wide BVH pathfinder
+- doorway centers are inferred from adjacent room bounds instead of trusting door object origins, which avoids the `0,0` portal failure seen in the first draft
+- room orbit is disabled by default in benchmark configs; the default room coverage motif is now door-to-room traversal plus in-place sweep
 
 Validation status:
 
 - validated on an existing benchmark scene copied from `outputs/benchmark/structured_light_indoors/seed_0/coarse`
 - trajectory planning completed successfully in `infinigen_311` and wrote `trajectory/scene.blend` plus `trajectory_metadata.json`
+- on `seed_0`, door centers now resolve to interior portal locations such as `(3.25, 3.5)`, `(7.75, 4.25)`, and `(5.0, 12.75)` instead of the invalid `(0, 0)` fallback
 - structured-light rendering wrote complete low-resolution outputs for both 2-frame and 1-frame checks under `/tmp/whole_home_walk_e2e/seed_0/`
 - the current `infinigen_311 + bpy` runtime still segfaults on shutdown after rendering completes, but the structured-light outputs are already present on disk when that happens
 

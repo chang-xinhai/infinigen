@@ -160,6 +160,27 @@ Low-cost validation example against an existing benchmark scene:
 
 On the current machine this produces valid structured-light outputs, but Blender may still segfault during shutdown after the render completes. Treat the presence of expected files under `sl_frames/structured_light/` as the success condition for this temporary validation workflow.
 
+For RGB-only trajectory preview renders on reused benchmark scenes, the most reliable low-cost command pattern is:
+
+```bash
+conda run -n infinigen_311 python -m infinigen_examples.generate_indoors \
+    --seed 0 \
+    --task render \
+    --input_folder outputs/benchmark/structured_light_indoors/seed_0/trajectory \
+    --output_folder outputs/benchmark/structured_light_indoors/seed_0/frames_preview \
+    -g benchmark.gin real_geometry_with_bump.gin whole_home_walk.gin \
+    -p execute_tasks.use_scene_frame_range=True \
+       full/render_image.passes_to_save=[] \
+       full/render_image.override_num_samples=16 \
+       full/render_image.render_resolution_override='(320, 240)' \
+       full/render_image.preview_force_lighting=True
+```
+
+Notes:
+
+- preview renders now auto-adjust camera sensor dimensions before saving camera parameters, so `320x240` runs can exit cleanly
+- reused indoor benchmark scenes may already have most scene lights deleted by the `coarse` pipeline, so `full/render_image.preview_force_lighting=True` is the intended verification-time fallback
+
 ## Parallelism Guidance
 
 `coarse` generation is primarily Python solver work plus Blender scene construction, so it benefits from CPU-side parallelism. Structured-light rendering uses Blender Cycles with `scene.cycles.device = "GPU"` and should usually remain single-scene on a single-GPU workstation.

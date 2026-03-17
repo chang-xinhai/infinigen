@@ -7,6 +7,7 @@
 # - Hei Law - Initial version
 
 
+import math
 import json
 import logging
 import os
@@ -18,6 +19,7 @@ import bpy
 import gin
 import numpy as np
 from imageio import imwrite
+from mathutils import Euler, Vector
 
 from infinigen.core import init
 from infinigen.core.nodes.node_wrangler import Nodes, NodeWrangler
@@ -41,6 +43,75 @@ from infinigen.tools.suffixes import get_suffix
 TRANSPARENT_SHADERS = {Nodes.TranslucentBSDF, Nodes.TransparentBSDF}
 
 logger = logging.getLogger(__name__)
+
+
+def _upsert_preview_light(
+    *,
+    name: str,
+    light_type: str,
+    energy: float,
+    location: tuple[float, float, float] | None = None,
+    rotation_deg: tuple[float, float, float] | None = None,
+    parent: bpy.types.Object | None = None,
+    local_offset: tuple[float, float, float] | None = None,
+):
+    light_obj = bpy.data.objects.get(name)
+    if light_obj is None or light_obj.type != "LIGHT" or light_obj.data.type != light_type:
+        light_data = bpy.data.lights.new(name=name, type=light_type)
+        light_obj = bpy.data.objects.new(name=name, object_data=light_data)
+        bpy.context.scene.collection.objects.link(light_obj)
+
+    light_obj.hide_render = False
+    light_obj.hide_viewport = False
+    light_obj.data.energy = energy
+
+    if rotation_deg is not None:
+        light_obj.rotation_euler = Euler(tuple(math.radians(v) for v in rotation_deg))
+    if location is not None:
+        light_obj.location = Vector(location)
+
+    light_obj.parent = parent
+    if local_offset is not None:
+        light_obj.location = Vector(local_offset)
+
+    return light_obj
+
+
+def _ensure_preview_lighting(
+    camera: bpy.types.Object,
+    *,
+    preview_force_lighting: bool,
+    preview_world_strength: float,
+    preview_sun_energy: float,
+    preview_sun_rotation_deg: tuple[float, float, float],
+    preview_camera_light_energy: float,
+    preview_camera_light_offset_m: tuple[float, float, float],
+):
+    if not preview_force_lighting:
+        return
+
+    scene = bpy.context.scene
+    if scene.world is None:
+        scene.world = bpy.data.worlds.new("World")
+    scene.world.use_nodes = True
+    bg = scene.world.node_tree.nodes.get("Background")
+    if bg is not None:
+        bg.inputs["Strength"].default_value = preview_world_strength
+
+    _upsert_preview_light(
+        name="PreviewTrajectorySun",
+        light_type="SUN",
+        energy=preview_sun_energy,
+        location=(0.0, 0.0, 12.0),
+        rotation_deg=preview_sun_rotation_deg,
+    )
+    _upsert_preview_light(
+        name="PreviewTrajectoryCamLight",
+        light_type="POINT",
+        energy=preview_camera_light_energy,
+        parent=camera,
+        local_offset=preview_camera_light_offset_m,
+    )
 
 
 def remove_translucency():
@@ -481,6 +552,13 @@ def render_image(
     dof_aperture_fstop=2.8,
     flat_shading=False,
     override_num_samples=None,
+    preview_force_lighting=False,
+    preview_world_strength=0.9,
+    preview_sun_energy=1.5,
+    preview_sun_rotation_deg=(55.0, 0.0, 35.0),
+    preview_camera_light_energy=500.0,
+    preview_camera_light_offset_m=(0.0, 0.0, 0.15),
+    auto_adjust_sensor_to_resolution=True,
 ):
     tic = time.time()
 
@@ -553,6 +631,18 @@ def render_image(
     if render_resolution_override is not None:
         bpy.context.scene.render.resolution_x = render_resolution_override[0]
         bpy.context.scene.render.resolution_y = render_resolution_override[1]
+        if auto_adjust_sensor_to_resolution:
+            cam_util.adjust_camera_sensor(camera)
+
+    _ensure_preview_lighting(
+        camera,
+        preview_force_lighting=preview_force_lighting,
+        preview_world_strength=preview_world_strength,
+        preview_sun_energy=preview_sun_energy,
+        preview_sun_rotation_deg=tuple(preview_sun_rotation_deg),
+        preview_camera_light_energy=preview_camera_light_energy,
+        preview_camera_light_offset_m=tuple(preview_camera_light_offset_m),
+    )
 
     # Render the scene
     bpy.context.scene.camera = camera

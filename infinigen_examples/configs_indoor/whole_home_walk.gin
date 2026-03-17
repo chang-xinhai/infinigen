@@ -20,6 +20,7 @@ animate_whole_home_walk.return_to_start_room = True
 
 animate_whole_home_walk.room_sweep_angle_deg = 300.0
 animate_whole_home_walk.room_sweep_yaw_speed_deg_s = 40.0
+animate_whole_home_walk.enable_room_orbit = False
 animate_whole_home_walk.room_orbit_min_room_radius_m = 1.2
 animate_whole_home_walk.room_orbit_radius_scale = 0.45
 animate_whole_home_walk.room_orbit_radius_min_m = 0.35
