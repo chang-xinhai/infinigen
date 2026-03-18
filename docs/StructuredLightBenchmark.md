@@ -231,6 +231,12 @@ where:
 
 The script infers `scene_seed` from the `seed_<N>` folder name, reuses or regenerates `trajectory/`, and then runs one manifest-driven structured-light capture task. The manifest is the single source of truth for which patterns, cameras, formats, and calibration payloads are written.
 
+Important detail:
+
+- `seed_<N>/capture/<setting>/config/capture_manifest.yaml` is a post-run snapshot copied by the script for bookkeeping
+- the actual pre-run configuration source is the manifest selected before launch, either `infinigen_examples/configs_indoor/capture_manifests/<setting>.yaml` or the file passed through `CAPTURE_MANIFEST=/path/to/custom.yaml`
+- if you want to change outputs such as dropping RGB depth `png`, edit the source manifest before capture instead of editing the copied snapshot after capture
+
 ### Full
 
 Recommended command:
@@ -344,6 +350,60 @@ Behavior is controlled by the selected capture manifest. The built-in defaults l
 - `infinigen_examples/configs_indoor/capture_manifests/full.yaml`
 - `infinigen_examples/configs_indoor/capture_manifests/rgb_only.yaml`
 - `infinigen_examples/configs_indoor/capture_manifests/debug.yaml`
+
+The launch script resolves the manifest like this:
+
+- default: `infinigen_examples/configs_indoor/capture_manifests/<SETTING>.yaml`
+- override: `CAPTURE_MANIFEST=/path/to/custom.yaml`
+
+The selected manifest is copied to `capture/<setting>/config/capture_manifest.yaml` after startup so each capture folder keeps a record of the exact inputs that were used.
+
+### Editing Outputs Before Capture
+
+To customize outputs, create or edit the source manifest before running the script.
+
+For example, the default `full.yaml` currently writes RGB depth in both `png` and `exr`:
+
+```yaml
+cameras:
+  rgb:
+    outputs:
+      depth:
+        - png
+        - exr
+```
+
+If you want RGB depth to keep only `exr`, change it to:
+
+```yaml
+cameras:
+  rgb:
+    outputs:
+      depth:
+        - exr
+```
+
+The recommended workflow is to create a new manifest instead of editing `full.yaml` in place. For example:
+
+```bash
+cp infinigen_examples/configs_indoor/capture_manifests/full.yaml \
+   infinigen_examples/configs_indoor/capture_manifests/full_exr_only.yaml
+```
+
+Then edit `full_exr_only.yaml` and run:
+
+```bash
+CAPTURE_MANIFEST=infinigen_examples/configs_indoor/capture_manifests/full_exr_only.yaml \
+bash scripts/launch/capture_existing_seed_scene.sh \
+    outputs/benchmark/structured_light_indoors/seed_42 \
+    full_exr_only
+```
+
+This keeps behavior and output naming aligned:
+
+- the source manifest controls what is rendered
+- the positional `SETTING` or `CAPTURE_SETTING` names the output folder
+- `capture/full_exr_only/config/capture_manifest.yaml` is just the archived copy of the source manifest used for that run
 
 Operational controls:
 
