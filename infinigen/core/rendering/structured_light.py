@@ -4,8 +4,8 @@
 #   capture_root/
 #     output/
 #       rgb/
-#       left/
-#       right/
+#       IR_left/
+#       IR_right/
 #       calibration/
 #     structured_light/
 #       patterns/
@@ -543,9 +543,17 @@ def _build_rgb_render_plan(output_root, manifest):
     }
 
 
+def _camera_output_dir_name(camera_key):
+    if camera_key == "left":
+        return "IR_left"
+    if camera_key == "right":
+        return "IR_right"
+    return camera_key
+
+
 def _build_pattern_render_plan(output_root, camera_key, pattern_name, manifest):
     image_formats = _camera_outputs(manifest, camera_key, "image")
-    cam_root = output_root / camera_key
+    cam_root = output_root / _camera_output_dir_name(camera_key)
     return {
         "image_png": (
             cam_root / "image" / pattern_name / "frame_{frame_tag}.png"
@@ -742,7 +750,7 @@ def render_structured_light(
     )
     if want_pattern_images and not pattern_specs:
         logger.warning(
-            "Capture manifest requested left/right pattern renders but no pattern files were resolved"
+            "Capture manifest requested IR pattern renders but no pattern files were resolved"
         )
 
     pattern_output.mkdir(parents=True, exist_ok=True)
@@ -753,8 +761,8 @@ def render_structured_light(
             dst_name = f"{pattern_spec['name']}{pattern_spec['path'].suffix.lower()}"
             shutil.copy2(pattern_spec["path"], pattern_output / dst_name)
 
-    for frame_idx in range(frame_start, frame_end + 1):
-        scene.frame_set(frame_idx)
+    for capture_frame_idx, scene_frame_idx in enumerate(range(frame_start, frame_end + 1)):
+        scene.frame_set(scene_frame_idx)
         bpy.context.view_layer.update()
 
         if cam_rig is not None:
@@ -768,9 +776,9 @@ def render_structured_light(
                 camera.matrix_world.to_3x3(),
             )
 
-        frame_ids.append(frame_idx)
+        frame_ids.append(capture_frame_idx)
         extrinsics.append(_record_requested_extrinsics(rig, manifest))
-        frame_tag = f"{frame_idx:04d}"
+        frame_tag = f"{capture_frame_idx:04d}"
 
         if want_rgb:
             _configure_preview_cycles(

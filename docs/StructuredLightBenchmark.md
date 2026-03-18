@@ -309,8 +309,8 @@ seed_<N>/
         ├── output/
         │   ├── calibration/
         │   ├── rgb/
-        │   ├── left/
-        │   └── right/
+        │   ├── IR_left/
+        │   └── IR_right/
         ├── stats/
         └── structured_light/
             └── patterns/

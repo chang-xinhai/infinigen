@@ -13,7 +13,7 @@ def _is_primary_depth_file(path: Path, capture_root: Path | None = None) -> bool
         return False
     rel = path.relative_to(capture_root).as_posix() if capture_root is not None else path.as_posix()
     name = path.name.lower()
-    if "/left/" in rel or "/right/" in rel:
+    if any(token in rel for token in ("/left/", "/right/", "/IR_left/", "/IR_right/")):
         return False
     if "_l_depth" in name or "_r_depth" in name:
         return False

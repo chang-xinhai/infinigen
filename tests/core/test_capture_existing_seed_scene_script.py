@@ -68,15 +68,15 @@ if [[ "$task" == "structured_light" ]]; then
         "$output_folder/output/rgb/image" \
         "$output_folder/output/rgb/depth" \
         "$output_folder/output/rgb/normal" \
-        "$output_folder/output/left/image/d415" \
-        "$output_folder/output/right/image/d415" \
+        "$output_folder/output/IR_left/image/d415" \
+        "$output_folder/output/IR_right/image/d415" \
         "$output_folder/output/calibration" \
         "$output_folder/structured_light/patterns"
-    touch "$output_folder/output/rgb/image/frame_0001.png"
-    touch "$output_folder/output/left/image/d415/frame_0001.png"
-    touch "$output_folder/output/right/image/d415/frame_0001.png"
+    touch "$output_folder/output/rgb/image/frame_0000.png"
+    touch "$output_folder/output/IR_left/image/d415/frame_0000.png"
+    touch "$output_folder/output/IR_right/image/d415/frame_0000.png"
     touch "$output_folder/structured_light/patterns/D415.png"
-    "$FAKE_HELPER_PYTHON" - "$output_folder/output/rgb/depth/frame_0001.npy" <<'PY'
+    "$FAKE_HELPER_PYTHON" - "$output_folder/output/rgb/depth/frame_0000.npy" <<'PY'
 import sys
 from pathlib import Path
 import numpy as np
@@ -97,7 +97,7 @@ payload = {
     "intrinsic": {"RGB": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]},
     "rel_R": {"RGB": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]},
     "rel_T": {"RGB": [0, 0, 0]},
-    "frame_ids": [1],
+    "frame_ids": [0],
     "extrinsic": [{"RGB": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]}],
     "patterns": ["d415"],
 }
@@ -139,15 +139,17 @@ exit 0
     assert (capture_root / "config" / "capture_settings.env").exists()
     assert (capture_root / "config" / "capture_manifest.yaml").exists()
     assert (capture_root / "logs" / "render.log").exists()
-    assert (capture_root / "output" / "rgb" / "image" / "frame_0001.png").exists()
-    assert (capture_root / "output" / "rgb" / "depth" / "frame_0001.npy").exists()
+    assert (capture_root / "output" / "rgb" / "image" / "frame_0000.png").exists()
+    assert (capture_root / "output" / "rgb" / "depth" / "frame_0000.npy").exists()
+    assert (capture_root / "output" / "IR_left" / "image" / "d415" / "frame_0000.png").exists()
+    assert (capture_root / "output" / "IR_right" / "image" / "d415" / "frame_0000.png").exists()
     assert (capture_root / "output" / "calibration" / "calibration.npz").exists()
     assert (capture_root / "structured_light" / "patterns" / "D415.png").exists()
 
     histogram = json.loads((capture_root / "stats" / "depth_histogram.json").read_text(encoding="utf-8"))
     assert histogram["status"] == "ok"
     assert histogram["depth_file_count"] == 1
-    assert histogram["depth_files"] == ["output/rgb/depth/frame_0001.npy"]
+    assert histogram["depth_files"] == ["output/rgb/depth/frame_0000.npy"]
     assert (capture_root / "stats" / "depth_histogram.png").exists()
     assert "Capture root:" in result.stdout
 
