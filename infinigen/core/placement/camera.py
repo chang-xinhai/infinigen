@@ -104,10 +104,9 @@ def adjust_camera_sensor(cam):
     scene = bpy.context.scene
     W = scene.render.resolution_x
     H = scene.render.resolution_y
-    sensor_width = 18 * (W / H)
-    assert sensor_width.is_integer(), (18, W, H)
+    sensor_width = 18.0 * (W / H)
     cam.data.sensor_height = 18
-    cam.data.sensor_width = int(sensor_width)
+    cam.data.sensor_width = sensor_width
 
 
 def spawn_camera():
