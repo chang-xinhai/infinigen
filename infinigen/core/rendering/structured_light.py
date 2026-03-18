@@ -3,8 +3,8 @@
 # into the Infinigen scene generation pipeline.
 #
 # Camera layout (viewed from behind):
-#   [Left IR] --- [Projector + RGB] --- [Right IR]
-# The projector and RGB camera share the same position (center).
+#   [RGB] - [Left IR] --- [Projector] --- [Right IR]
+# RGB is slightly left of the left IR camera by default.
 # Left/Right IR cameras are offset by ±baseline/2 along the local X axis.
 # RGB captures the scene WITHOUT projection (ambient light only).
 # IR cameras capture the scene WITH the projected pattern.
@@ -49,6 +49,7 @@ class StructuredLightRig:
         cam_fov_deg=69.4,
         cam_sensor_width=6.328,
         cam_sensor_height=4.746,
+        rgb_offset_scale=-0.55,
         proj_fov_delta_deg=5.0,
         proj_dlp_size=6.328,
         proj_energy=30.0,
@@ -61,6 +62,7 @@ class StructuredLightRig:
         self.cam_fov_deg = cam_fov_deg
         self.cam_sensor_width = cam_sensor_width
         self.cam_sensor_height = cam_sensor_height
+        self.rgb_offset_scale = rgb_offset_scale
         self.proj_fov_delta_deg = proj_fov_delta_deg
         self.proj_dlp_size = proj_dlp_size
         self.proj_energy = proj_energy
@@ -104,9 +106,11 @@ class StructuredLightRig:
         self.right_cam = self._make_camera(SL_RIGHT_CAM_NAME)
         self.right_cam.location = mathutils.Vector((self.baseline / 2, 0, 0))
 
-        # RGB camera (centre, co-located with projector)
+        # RGB camera (offset along -X by baseline * rgb_offset_scale)
         self.rgb_cam = self._make_camera(SL_RGB_CAM_NAME)
-        self.rgb_cam.location = mathutils.Vector((0, 0, 0))
+        self.rgb_cam.location = mathutils.Vector(
+            (self.baseline * self.rgb_offset_scale, 0, 0)
+        )
 
         # Projector (uses the Blender Projectors addon)
         self._make_projector()
@@ -379,10 +383,42 @@ class StructuredLightRig:
         )
         return T_world2cam
 
-    def get_rel_translation(self, lr: str):
-        """Translation of L/R camera relative to projector (centre)."""
-        x = -self.baseline / 2 if lr.upper() == "L" else self.baseline / 2
+    def get_rel_translation(self, camera_name: str):
+        """Translation of a rig camera relative to the projector origin."""
+        name = camera_name.upper()
+        if name == "L":
+            x = -self.baseline / 2
+        elif name == "R":
+            x = self.baseline / 2
+        elif name == "RGB":
+            x = self.baseline * self.rgb_offset_scale
+        else:
+            raise ValueError(f"Unsupported rig camera {camera_name!r}")
         return np.array([x, 0, 0], dtype=np.float64)
+
+    def build_parameters_dict(self, extrinsics, patterns):
+        """Assemble the calibration payload saved alongside rendered outputs."""
+        return {
+            "baseline": self.baseline,
+            "intrinsic": {
+                "L": self.get_camera_intrinsic().tolist(),
+                "R": self.get_camera_intrinsic().tolist(),
+                "RGB": self.get_rgb_intrinsic().tolist(),
+                "Proj": self.get_projector_intrinsic().tolist(),
+            },
+            "rel_R": {
+                "L": np.eye(3).tolist(),
+                "R": np.eye(3).tolist(),
+                "RGB": np.eye(3).tolist(),
+            },
+            "rel_T": {
+                "L": self.get_rel_translation("L").tolist(),
+                "R": self.get_rel_translation("R").tolist(),
+                "RGB": self.get_rel_translation("RGB").tolist(),
+            },
+            "extrinsic": extrinsics,
+            "patterns": patterns,
+        }
 
 
 # ──────────────────────────────────────────────────────────────
@@ -398,6 +434,7 @@ def render_structured_light(
     sl_cam_fov_deg=69.4,
     sl_cam_sensor_width=6.328,
     sl_cam_sensor_height=4.746,
+    sl_rgb_offset_scale=-0.55,
     sl_proj_fov_delta_deg=5.0,
     sl_proj_dlp_size=6.328,
     sl_proj_energy=30.0,
@@ -466,6 +503,7 @@ def render_structured_light(
         cam_fov_deg=sl_cam_fov_deg,
         cam_sensor_width=sl_cam_sensor_width,
         cam_sensor_height=sl_cam_sensor_height,
+        rgb_offset_scale=sl_rgb_offset_scale,
         proj_fov_delta_deg=sl_proj_fov_delta_deg,
         proj_dlp_size=sl_proj_dlp_size,
         proj_energy=sl_proj_energy,
@@ -570,25 +608,10 @@ def render_structured_light(
         rig.set_env_strength(orig_env_strength)
 
     # ── Save parameters.npz ────────────────────────────────────
-    parameters = {
-        "baseline": rig.baseline,
-        "intrinsic": {
-            "L": rig.get_camera_intrinsic().tolist(),
-            "R": rig.get_camera_intrinsic().tolist(),
-            "RGB": rig.get_rgb_intrinsic().tolist(),
-            "Proj": rig.get_projector_intrinsic().tolist(),
-        },
-        "rel_R": {
-            "L": np.eye(3).tolist(),
-            "R": np.eye(3).tolist(),
-        },
-        "rel_T": {
-            "L": rig.get_rel_translation("L").tolist(),
-            "R": rig.get_rel_translation("R").tolist(),
-        },
-        "extrinsic": all_extrinsics,
-        "patterns": [Path(p).stem for p in pattern_paths],
-    }
+    parameters = rig.build_parameters_dict(
+        all_extrinsics,
+        [Path(p).stem for p in pattern_paths],
+    )
     np.savez(sl_output / "parameters.npz", parameters)
 
     # Also save as JSON for easy inspection

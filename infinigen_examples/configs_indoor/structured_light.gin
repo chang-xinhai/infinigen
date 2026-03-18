@@ -16,6 +16,7 @@ render_structured_light.sl_baseline = 0.055           # metres between L and R I
 render_structured_light.sl_cam_fov_deg = 69.4         # horizontal FOV of IR cameras
 render_structured_light.sl_cam_sensor_width = 6.328   # mm
 render_structured_light.sl_cam_sensor_height = 4.746  # mm
+render_structured_light.sl_rgb_offset_scale = -0.55   # RGB x = baseline * scale; puts RGB slightly left of L
 render_structured_light.sl_proj_fov_delta_deg = 5.0   # projector FOV = cam FOV + delta
 render_structured_light.sl_proj_dlp_size = 6.328      # mm, projector DLP chip diagonal
 render_structured_light.sl_proj_energy = 30.0         # Blender spotlight energy (watts)
