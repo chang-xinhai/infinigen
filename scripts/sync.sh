@@ -11,12 +11,11 @@ Usage:
   bash scripts/sync.sh download <relative_path>
 
 Examples:
-  bash scripts/sync.sh upload outputs/benchmark/structured_light_indoors/seed_0
-  bash scripts/sync.sh download outputs/benchmark/structured_light_indoors/seed_0
-
+  bash scripts/sync.sh upload relative_path/to/local/file_or_dir
+  bash scripts/sync.sh download relative_path/to/remote/file_or_dir
 Behavior:
-  Local relative path:  outputs/foo/bar
-  Remote full path:     /Research/infinigen/outputs/foo/bar
+  Local relative path:  relative_path/to/local/file_or_dir
+  Remote full path:     /Research/infinigen/relative_path/to/remote/file_or_dir
 EOF
 }
 
@@ -68,6 +67,35 @@ mkdir_remote_parents() {
     done
 }
 
+prune_empty_dirs() {
+    local dir="$1"
+    local stop_dir="$2"
+
+    while [[ "${dir}" != "${stop_dir}" && "${dir}" != "/" ]]; do
+        rmdir "${dir}" >/dev/null 2>&1 || break
+        dir="$(dirname "${dir}")"
+    done
+}
+
+fix_download_layout() {
+    local rel_path="$1"
+    local local_parent="$2"
+    local target_path="${PWD}/${rel_path}"
+
+    if [[ -e "${target_path}" ]]; then
+        return 0
+    fi
+
+    local nested_path="${local_parent}/${REMOTE_ROOT#/}/${rel_path}"
+    if [[ ! -e "${nested_path}" ]]; then
+        return 0
+    fi
+
+    mkdir -p "$(dirname "${target_path}")"
+    mv "${nested_path}" "${target_path}"
+    prune_empty_dirs "$(dirname "${nested_path}")" "${local_parent}"
+}
+
 main() {
     if [[ $# -ne 2 ]]; then
         usage
@@ -107,6 +135,7 @@ main() {
             echo "Local target: ${rel_path}"
 
             aliyunpan download --saveto "${local_parent}" "${remote_path}"
+            fix_download_layout "${rel_path}" "${local_parent}"
             ;;
         *)
             echo "Error: unsupported mode: ${mode}" >&2

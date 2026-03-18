@@ -27,6 +27,7 @@ Download behavior:
 
 - The script downloads the remote file or directory from `/Research/infinigen/...`
 - It restores the same relative path under the current repository checkout.
+- If `aliyunpan download --saveto` recreates the remote absolute path prefix such as `Research/infinigen/...` under the local target, the script moves the downloaded file or directory back to the requested relative path and removes the empty intermediate directories.
 
 ## Requirements
 
