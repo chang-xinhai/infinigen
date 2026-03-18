@@ -221,43 +221,15 @@ This validated run writes:
 For batch reruns on already-generated benchmark scenes such as `outputs/benchmark/structured_light_indoors/seed_42/coarse/scene.blend`, use:
 
 ```bash
-bash scripts/launch/capture_existing_seed_scene.sh <SCENE_DIR> <MODE>
+bash scripts/launch/capture_existing_seed_scene.sh <SCENE_DIR> [SETTING]
 ```
 
 where:
 
 - `SCENE_DIR` is the seed root, for example `outputs/benchmark/structured_light_indoors/seed_42`
-- `MODE` is `rgb_only` or `full`
+- `SETTING` selects the capture manifest and the output directory name, for example `rgb_only`, `debug`, or `full`
 
-The script infers `scene_seed` from the `seed_<N>` folder name, reruns the whole-home trajectory stage if needed, and then renders either RGB-only outputs or the full RGB + structured-light package.
-
-### RGB-only
-
-Recommended command:
-
-```bash
-CONDA_ENV=infinigen_311 \
-RUN_TAG=fps3_rgb320 \
-WALK_FPS=3 \
-WALK_STEP_M=0.15 \
-RGB_WIDTH=320 \
-RGB_HEIGHT=240 \
-RGB_SAMPLES=16 \
-RGB_DELETE_EXR_AFTER_RENDER=1 \
-bash scripts/launch/capture_existing_seed_scene.sh \
-    outputs/benchmark/structured_light_indoors/seed_42 \
-    rgb_only
-```
-
-This mode:
-
-- writes the whole rerun into `outputs/benchmark/structured_light_indoors/seed_42/captures/<RUN_TAG>/`
-- writes trajectory outputs to `.../captures/<RUN_TAG>/trajectory/`
-- writes RGB outputs to `.../captures/<RUN_TAG>/rgb/frames/`
-- writes logs to `.../captures/<RUN_TAG>/logs/` and resolved settings to `.../captures/<RUN_TAG>/config/capture_settings.env`
-- deletes RGB `exr` files by default so the final RGB directory only keeps `png` frames plus camera metadata
-- writes `rgb_first_frame.png`, `rgb_contact_sheet.png`, and `rgb_preview_stride*.gif` under `.../captures/<RUN_TAG>/rgb/` for quick inspection
-- writes a scene-level depth histogram summary to `.../captures/<RUN_TAG>/stats/depth_histogram.{json,png}` when depth files are available
+The script infers `scene_seed` from the `seed_<N>` folder name, reuses or regenerates `trajectory/`, and then runs one manifest-driven structured-light capture task. The manifest is the single source of truth for which patterns, cameras, formats, and calibration payloads are written.
 
 ### Full
 
@@ -265,44 +237,77 @@ Recommended command:
 
 ```bash
 CONDA_ENV=infinigen_311 \
-RUN_TAG=full_fps3 \
 WALK_FPS=3 \
 WALK_STEP_M=0.15 \
-RGB_WIDTH=848 \
-RGB_HEIGHT=480 \
-RGB_SAMPLES=32 \
+CAPTURE_WIDTH=848 \
+CAPTURE_HEIGHT=480 \
 SL_MAX_SAMPLES=128 \
 bash scripts/launch/capture_existing_seed_scene.sh \
-    outputs/benchmark/structured_light_indoors/seed_1 \
+    outputs/benchmark/structured_light_indoors/seed_42 \
     full
 ```
 
-This mode:
+This setting:
 
-- reruns the whole-home trajectory into `captures/<RUN_TAG>/trajectory/`
-- rerenders standard RGB into `captures/<RUN_TAG>/rgb/frames/`
-- keeps RGB `png + exr + camview` by default
-- renders structured-light outputs into `captures/<RUN_TAG>/structured_light/task/structured_light/`
-- exposes the structured-light frame directory at `captures/<RUN_TAG>/structured_light/frames/`
-- writes a scene-level depth histogram summary to `captures/<RUN_TAG>/stats/depth_histogram.{json,png}`
+- writes reusable walking animation to `seed_<N>/trajectory/`
+- writes the capture to `seed_<N>/capture/full/`
+- writes the selected manifest to `capture/full/config/capture_manifest.yaml`
+- writes the merged run log to `capture/full/logs/render.log`
+- writes the scene-level depth histogram summary to `capture/full/stats/depth_histogram.{json,png}`
+- writes selected pattern png files to `capture/full/structured_light/patterns/`
+- writes actual render outputs to `capture/full/output/`
+- writes aggregate calibration to `capture/full/output/calibration/calibration.npz`
+
+### RGB-only
+
+Recommended command:
+
+```bash
+CONDA_ENV=infinigen_311 \
+WALK_FPS=3 \
+WALK_STEP_M=0.15 \
+CAPTURE_WIDTH=320 \
+CAPTURE_HEIGHT=240 \
+bash scripts/launch/capture_existing_seed_scene.sh \
+    outputs/benchmark/structured_light_indoors/seed_42 \
+    rgb_only
+```
+
+This setting uses `infinigen_examples/configs_indoor/capture_manifests/rgb_only.yaml`, disables L/R image export, and still writes RGB image, depth, normal, plus aggregate calibration under `seed_<N>/capture/rgb_only/output/`.
+
+### Debug
+
+For quick structured-light checks with one pattern and optional JSONL calibration:
+
+```bash
+CONDA_ENV=infinigen_311 \
+WALK_FPS=3 \
+CAPTURE_WIDTH=320 \
+CAPTURE_HEIGHT=240 \
+bash scripts/launch/capture_existing_seed_scene.sh \
+    outputs/benchmark/structured_light_indoors/seed_42 \
+    debug
+```
 
 The rerun layout is now:
 
 ```text
 seed_<N>/
 ├── coarse/
-└── captures/
-    └── <RUN_TAG>/
+├── trajectory/
+└── capture/
+    └── <setting>/
         ├── config/
         ├── logs/
-        ├── rgb/
-        │   ├── frames/
-        │   └── render_task/
+        │   └── render.log
+        ├── output/
+        │   ├── calibration/
+        │   ├── rgb/
+        │   ├── left/
+        │   └── right/
         ├── stats/
-        ├── structured_light/
-        │   ├── frames -> task/structured_light
-        │   └── task/
-        └── trajectory/
+        └── structured_light/
+            └── patterns/
 ```
 
 ### Main Knobs
@@ -325,33 +330,25 @@ Important trajectory controls:
 - `WALK_FORCE_OPEN_ACCESS_DOORS`
 - `WALK_FORCE_OPEN_ACCESS_DOORS_MODE`
 
-Important RGB render controls:
+Important capture controls:
 
-- `RGB_WIDTH`
-- `RGB_HEIGHT`
-- `RGB_SAMPLES`
-- `RGB_FORCE_LIGHTING`
-- `RGB_WORLD_STRENGTH`
-- `RGB_SUN_ENERGY`
-- `RGB_CAMERA_LIGHT_ENERGY`
-- `RGB_FORCE_DENOISING`
-- `RGB_DISABLE_CAUSTICS`
-- `RGB_SAMPLE_CLAMP_INDIRECT`
-- `RGB_SAMPLE_CLAMP_DIRECT`
-- `RGB_DELETE_EXR_AFTER_RENDER`
-
-Important structured-light controls:
-
+- `CAPTURE_WIDTH`
+- `CAPTURE_HEIGHT`
 - `SL_MAX_SAMPLES`
+- `CAPTURE_MANIFEST`
+- `SL_PATTERN_DIR`
+- `SL_PATTERN_WHITE`
+
+Behavior is controlled by the selected capture manifest. The built-in defaults live under:
+
+- `infinigen_examples/configs_indoor/capture_manifests/full.yaml`
+- `infinigen_examples/configs_indoor/capture_manifests/rgb_only.yaml`
+- `infinigen_examples/configs_indoor/capture_manifests/debug.yaml`
 
 Operational controls:
 
-- `RUN_TAG` controls output folder suffixes
 - `REUSE_EXISTING_TRAJECTORY=1` reuses a previously generated trajectory scene
-- `FRAME_RANGE=start,end` reruns only a subset of frames for both RGB and structured-light modes
-- `RUN_RGB_RENDER_IN_FULL=0` skips standard RGB in `full` mode
-- `RUN_STRUCTURED_LIGHT_IN_FULL=0` skips structured-light in `full` mode
-- `GENERATE_PREVIEW_ARTIFACTS=0` disables contact sheet and gif generation
+- `FRAME_RANGE=start,end` reruns only a subset of frames for the manifest-selected capture
 - `DEPTH_HISTOGRAM_ENABLED=0` disables scene-level depth histogram generation
 - `DEPTH_HISTOGRAM_BINS`, `DEPTH_HISTOGRAM_MIN_M`, and `DEPTH_HISTOGRAM_MAX_M` control histogram binning and clipping
 

@@ -1,0 +1,32 @@
+setting: debug
+patterns:
+  names:
+    - d415
+  white: white.png
+cameras:
+  rgb:
+    outputs:
+      image:
+        - png
+      depth:
+        - png
+    calibration:
+      intrinsic: true
+      extrinsic: true
+  left:
+    outputs:
+      image:
+        - png
+    calibration:
+      intrinsic: true
+      extrinsic: false
+  right:
+    outputs:
+      image:
+        - png
+    calibration:
+      intrinsic: true
+      extrinsic: false
+calibration:
+  save_npz: true
+  save_jsonl: true

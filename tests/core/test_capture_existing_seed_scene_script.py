@@ -10,7 +10,7 @@ from pathlib import Path
 import infinigen
 
 
-def test_capture_existing_seed_scene_uses_structured_layout_and_depth_stats(tmp_path):
+def test_capture_existing_seed_scene_uses_manifest_capture_layout_and_depth_stats(tmp_path):
     repo_root = infinigen.repo_root()
     script_path = repo_root / "scripts/launch/capture_existing_seed_scene.sh"
     fake_python = tmp_path / "fake_generate_indoors.sh"
@@ -62,27 +62,20 @@ if [[ "$task" == "trajectory" ]]; then
     exit 0
 fi
 
-if [[ "$task" == "render" ]]; then
-    root="$(dirname "$output_folder")"
-    mkdir -p "$root/frames/Image/camera_0" "$root/frames/camview/camera_0" "$root/frames/Depth/camera_0"
-    touch "$root/frames/Image/camera_0/Image_0_0_0001_0.png"
-    touch "$root/frames/camview/camera_0/camview_0_0_0001_0.npz"
-    "$FAKE_HELPER_PYTHON" - "$root/frames/Depth/camera_0/Depth_0_0_0001_0.npy" <<'PY'
-import sys
-from pathlib import Path
-import numpy as np
-
-path = Path(sys.argv[1])
-path.parent.mkdir(parents=True, exist_ok=True)
-np.save(path, np.array([[1.0, 2.0], [2.5, 3.0]], dtype=np.float32))
-PY
-    exit 0
-fi
-
 if [[ "$task" == "structured_light" ]]; then
-    mkdir -p "$output_folder/structured_light"
-    touch "$output_folder/structured_light/done.txt"
-    "$FAKE_HELPER_PYTHON" - "$output_folder/structured_light/0001_Depth.npy" <<'PY'
+    mkdir -p \
+        "$output_folder/output/rgb/image" \
+        "$output_folder/output/rgb/depth" \
+        "$output_folder/output/rgb/normal" \
+        "$output_folder/output/left/image/d415" \
+        "$output_folder/output/right/image/d415" \
+        "$output_folder/output/calibration" \
+        "$output_folder/structured_light/patterns"
+    touch "$output_folder/output/rgb/image/frame_0001.png"
+    touch "$output_folder/output/left/image/d415/frame_0001.png"
+    touch "$output_folder/output/right/image/d415/frame_0001.png"
+    touch "$output_folder/structured_light/patterns/D415.png"
+    "$FAKE_HELPER_PYTHON" - "$output_folder/output/rgb/depth/frame_0001.npy" <<'PY'
 import sys
 from pathlib import Path
 import numpy as np
@@ -90,6 +83,24 @@ import numpy as np
 path = Path(sys.argv[1])
 path.parent.mkdir(parents=True, exist_ok=True)
 np.save(path, np.array([[0.8, 1.2], [1.6, 2.4]], dtype=np.float32))
+PY
+    "$FAKE_HELPER_PYTHON" - "$output_folder/output/calibration/calibration.npz" <<'PY'
+import sys
+from pathlib import Path
+import numpy as np
+
+path = Path(sys.argv[1])
+path.parent.mkdir(parents=True, exist_ok=True)
+payload = {
+    "baseline": 0.055,
+    "intrinsic": {"RGB": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]},
+    "rel_R": {"RGB": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]},
+    "rel_T": {"RGB": [0, 0, 0]},
+    "frame_ids": [1],
+    "extrinsic": [{"RGB": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]}],
+    "patterns": ["d415"],
+}
+np.savez(path, payload)
 PY
     exit 0
 fi
@@ -106,8 +117,6 @@ exit 0
             "PYTHON_BIN": str(fake_python),
             "POST_PYTHON_BIN": sys.executable,
             "FAKE_HELPER_PYTHON": sys.executable,
-            "RUN_TAG": "capture_test",
-            "GENERATE_PREVIEW_ARTIFACTS": "0",
         }
     )
 
@@ -122,17 +131,21 @@ exit 0
 
     assert result.returncode == 0, result.stderr
 
-    capture_root = scene_dir / "captures" / "capture_test"
-    assert (capture_root / "trajectory" / "scene.blend").exists()
-    assert (capture_root / "trajectory" / "trajectory_metadata.json").exists()
-    assert (capture_root / "rgb" / "frames" / "Image" / "camera_0" / "Image_0_0_0001_0.png").exists()
-    assert (capture_root / "structured_light" / "task" / "structured_light" / "done.txt").exists()
-    assert (capture_root / "structured_light" / "frames" / "done.txt").exists()
+    trajectory_root = scene_dir / "trajectory"
+    capture_root = scene_dir / "capture" / "full"
+    assert (trajectory_root / "scene.blend").exists()
+    assert (trajectory_root / "trajectory_metadata.json").exists()
     assert (capture_root / "config" / "capture_settings.env").exists()
+    assert (capture_root / "config" / "capture_manifest.yaml").exists()
+    assert (capture_root / "logs" / "render.log").exists()
+    assert (capture_root / "output" / "rgb" / "image" / "frame_0001.png").exists()
+    assert (capture_root / "output" / "rgb" / "depth" / "frame_0001.npy").exists()
+    assert (capture_root / "output" / "calibration" / "calibration.npz").exists()
+    assert (capture_root / "structured_light" / "patterns" / "D415.png").exists()
 
     histogram = json.loads((capture_root / "stats" / "depth_histogram.json").read_text(encoding="utf-8"))
     assert histogram["status"] == "ok"
     assert histogram["depth_file_count"] == 1
-    assert histogram["depth_files"] == ["structured_light/task/structured_light/0001_Depth.npy"]
+    assert histogram["depth_files"] == ["output/rgb/depth/frame_0001.npy"]
     assert (capture_root / "stats" / "depth_histogram.png").exists()
     assert "Capture root:" in result.stdout

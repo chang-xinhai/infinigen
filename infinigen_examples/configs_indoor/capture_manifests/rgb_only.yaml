@@ -1,0 +1,31 @@
+setting: rgb_only
+patterns:
+  names: []
+  white: white.png
+cameras:
+  rgb:
+    outputs:
+      image:
+        - png
+      depth:
+        - png
+        - exr
+      normal:
+        - png
+        - exr
+    calibration:
+      intrinsic: true
+      extrinsic: true
+  left:
+    outputs: {}
+    calibration:
+      intrinsic: false
+      extrinsic: false
+  right:
+    outputs: {}
+    calibration:
+      intrinsic: false
+      extrinsic: false
+calibration:
+  save_npz: true
+  save_jsonl: false

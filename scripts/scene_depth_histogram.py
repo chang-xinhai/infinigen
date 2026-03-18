@@ -8,24 +8,31 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 
-def _is_primary_depth_file(path: Path) -> bool:
+def _is_primary_depth_file(path: Path, capture_root: Path | None = None) -> bool:
     if path.suffix.lower() not in {".npy", ".exr"}:
         return False
-    name = path.name
-    if "Depth" not in name:
+    rel = path.relative_to(capture_root).as_posix() if capture_root is not None else path.as_posix()
+    name = path.name.lower()
+    if "/left/" in rel or "/right/" in rel:
         return False
-    if "_L_Depth" in name or "_R_Depth" in name:
+    if "_l_depth" in name or "_r_depth" in name:
         return False
-    return True
+    if "depth" in name:
+        return True
+    return "/rgb/depth/" in rel
 
 
 def _iter_depth_files(capture_root: Path) -> list[Path]:
-    candidates = sorted(path for path in capture_root.rglob("*") if _is_primary_depth_file(path))
+    candidates = sorted(
+        path for path in capture_root.rglob("*") if _is_primary_depth_file(path, capture_root)
+    )
     preferred = []
     fallback = []
     for path in candidates:
         rel = path.relative_to(capture_root).as_posix()
-        if rel.startswith("structured_light/frames/") or rel.startswith("structured_light/task/structured_light/"):
+        if rel.startswith("output/rgb/depth/"):
+            preferred.append(path)
+        elif rel.startswith("structured_light/frames/") or rel.startswith("structured_light/task/structured_light/"):
             preferred.append(path)
         else:
             fallback.append(path)

@@ -28,10 +28,12 @@ render_structured_light.sl_pattern_resolution_x = 1280
 render_structured_light.sl_pattern_resolution_y = 720
 
 # ── Pattern directory ─────────────────────────────────────────
-# Set to None to auto-detect from .idea/deepsl-data/data/patterns/
+# Set to None to use the built-in repository assets under data/patterns/
 # Or override with an absolute path to your own pattern folder.
 render_structured_light.sl_pattern_dir = None
 render_structured_light.sl_pattern_white = 'white.png'
+render_structured_light.sl_pattern_names = ['d415', 'd435', 'kinectsp']
+render_structured_light.sl_capture_manifest_path = None
 
 # ── Render quality ────────────────────────────────────────────
 render_structured_light.sl_max_samples = 64

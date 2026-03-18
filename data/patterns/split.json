@@ -1,0 +1,5 @@
+{
+    "train":["alacarte.png", "alacarteroll.png", "D415.png", "D435.png", "snowleopard.png", "sincos.png"],
+    "test": ["alacarte.png", "alacarteroll.png", "D415.png", "D435.png", "snowleopard.png", "sincos.png", "kinectsp.png", "randsquare.png"],
+    "val": ["alacarte.png", "alacarteroll.png", "D415.png", "D435.png", "snowleopard.png", "sincos.png", "kinectsp.png", "randsquare.png"]
+}
