@@ -6,6 +6,7 @@ from mathutils import Matrix, Vector
 from infinigen.core.placement.whole_home_trajectory import (
     DoorRecord,
     RoomRecord,
+    _apply_height_perturbation,
     _astar_grid_path,
     _door_anchor,
     _infer_portal_center,
@@ -129,3 +130,54 @@ def test_shortcut_polyline_removes_visibility_redundant_turns():
     shortcut = _shortcut_polyline(points, is_segment_valid=lambda a, b: True)
 
     assert shortcut == [Vector((0.0, 0.0, 0.0)), Vector((2.0, 1.0, 0.0))]
+
+
+def test_apply_height_perturbation_is_bounded_and_deterministic():
+    room = _room("living", (0.0, 0.0, 0.0), (6.0, 6.0, 3.0))
+    samples = [
+        {
+            "location": Vector((float(idx), 0.0, room.center.z)),
+            "rotation": Vector((0.0, 0.0, 0.0)),
+            "room": room.name,
+            "state": "room_to_door",
+        }
+        for idx in range(6)
+    ]
+
+    summary_a = _apply_height_perturbation(
+        samples=samples,
+        rooms={room.name: room},
+        camera_height_m=1.55,
+        planner_fps=4,
+        amplitude_m=0.04,
+        frequency_hz=0.35,
+        scene_seed=7,
+    )
+    z_values_a = [sample["location"].z for sample in samples]
+    offsets_a = [sample["height_offset_m"] for sample in samples]
+
+    samples_b = [
+        {
+            "location": Vector((float(idx), 0.0, room.center.z)),
+            "rotation": Vector((0.0, 0.0, 0.0)),
+            "room": room.name,
+            "state": "room_to_door",
+        }
+        for idx in range(6)
+    ]
+    summary_b = _apply_height_perturbation(
+        samples=samples_b,
+        rooms={room.name: room},
+        camera_height_m=1.55,
+        planner_fps=4,
+        amplitude_m=0.04,
+        frequency_hz=0.35,
+        scene_seed=7,
+    )
+
+    assert summary_a["enabled"] is True
+    assert summary_a == summary_b
+    assert offsets_a == [sample["height_offset_m"] for sample in samples_b]
+    assert z_values_a == [sample["location"].z for sample in samples_b]
+    assert all(abs(offset) <= 0.04 + 1e-6 for offset in offsets_a)
+    assert any(abs(offset) > 1e-3 for offset in offsets_a)

@@ -1092,12 +1092,76 @@ def _force_open_access_doors(
 
 
 def _serialize_sample(sample: dict, frame: int) -> dict:
-    return {
+    payload = {
         "frame": frame,
         "location": [float(v) for v in sample["location"]],
         "rotation_euler": [float(v) for v in sample["rotation"]],
         "room": sample["room"],
         "state": sample["state"],
+    }
+    if "height_offset_m" in sample:
+        payload["height_offset_m"] = float(sample["height_offset_m"])
+    return payload
+
+
+def _apply_height_perturbation(
+    samples: list[dict],
+    rooms: dict[str, RoomRecord],
+    camera_height_m: float,
+    planner_fps: int,
+    amplitude_m: float,
+    frequency_hz: float,
+    scene_seed: int,
+) -> dict:
+    if not samples:
+        return {
+            "enabled": False,
+            "amplitude_m": float(amplitude_m),
+            "frequency_hz": float(frequency_hz),
+            "phase_rad": 0.0,
+            "min_offset_m": 0.0,
+            "max_offset_m": 0.0,
+        }
+
+    amplitude_m = max(0.0, float(amplitude_m))
+    frequency_hz = max(0.0, float(frequency_hz))
+    if amplitude_m <= 1e-6 or frequency_hz <= 1e-6 or planner_fps <= 0:
+        for sample in samples:
+            room = rooms.get(sample["room"])
+            if room is not None:
+                sample["location"].z = room.floor_z + camera_height_m
+            sample["height_offset_m"] = 0.0
+        return {
+            "enabled": False,
+            "amplitude_m": amplitude_m,
+            "frequency_hz": frequency_hz,
+            "phase_rad": 0.0,
+            "min_offset_m": 0.0,
+            "max_offset_m": 0.0,
+        }
+
+    phase = float(np.random.default_rng(scene_seed).uniform(0.0, 2.0 * math.pi))
+    offsets = []
+    angular_speed = 2.0 * math.pi * frequency_hz
+    for idx, sample in enumerate(samples):
+        time_s = idx / planner_fps
+        primary = 0.7 * math.sin(angular_speed * time_s + phase)
+        secondary = 0.3 * math.sin(2.0 * angular_speed * time_s + 0.5 * phase)
+        offset = amplitude_m * (primary + secondary)
+        room = rooms.get(sample["room"])
+        if room is not None:
+            sample["location"].z = room.floor_z + camera_height_m + offset
+        else:
+            sample["location"].z += offset
+        sample["height_offset_m"] = float(offset)
+        offsets.append(offset)
+    return {
+        "enabled": True,
+        "amplitude_m": amplitude_m,
+        "frequency_hz": frequency_hz,
+        "phase_rad": phase,
+        "min_offset_m": float(min(offsets)),
+        "max_offset_m": float(max(offsets)),
     }
 
 
@@ -1136,6 +1200,8 @@ def animate_whole_home_walk(
     traversal_pitch_deg: float = -4.0,
     sweep_pitch_deg: float = -2.0,
     traversal_lookahead_pts: int = 5,
+    height_perturbation_amplitude_m: float = 0.0,
+    height_perturbation_frequency_hz: float = 0.35,
     force_open_access_doors: bool = True,
     force_open_access_doors_mode: str = "hide",
 ):
@@ -1386,6 +1452,16 @@ def animate_whole_home_walk(
             repair_margin_m=collision_repair_margin_m,
         )
 
+    height_perturbation = _apply_height_perturbation(
+        samples=samples,
+        rooms=rooms,
+        camera_height_m=camera_height_m,
+        planner_fps=planner_fps,
+        amplitude_m=height_perturbation_amplitude_m,
+        frequency_hz=height_perturbation_frequency_hz,
+        scene_seed=scene_seed,
+    )
+
     scene = bpy.context.scene
     scene.render.fps = planner_fps
     scene.frame_start = 1
@@ -1431,6 +1507,9 @@ def animate_whole_home_walk(
         "collision_repair_margin_m": collision_repair_margin_m,
         "traversal_pitch_deg": traversal_pitch_deg,
         "sweep_pitch_deg": sweep_pitch_deg,
+        "height_perturbation_amplitude_m": height_perturbation_amplitude_m,
+        "height_perturbation_frequency_hz": height_perturbation_frequency_hz,
+        "height_perturbation": height_perturbation,
         "force_open_access_doors": force_open_access_doors,
         "force_open_access_doors_mode": force_open_access_doors_mode,
         "rooms": [

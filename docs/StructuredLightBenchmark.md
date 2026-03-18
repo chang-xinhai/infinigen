@@ -251,10 +251,13 @@ bash scripts/launch/capture_existing_seed_scene.sh \
 
 This mode:
 
-- writes trajectory outputs to `outputs/benchmark/structured_light_indoors/seed_42/trajectory_<RUN_TAG>/`
-- writes RGB outputs to `outputs/benchmark/structured_light_indoors/seed_42_<RUN_TAG>_rgb/frames/`
+- writes the whole rerun into `outputs/benchmark/structured_light_indoors/seed_42/captures/<RUN_TAG>/`
+- writes trajectory outputs to `.../captures/<RUN_TAG>/trajectory/`
+- writes RGB outputs to `.../captures/<RUN_TAG>/rgb/frames/`
+- writes logs to `.../captures/<RUN_TAG>/logs/` and resolved settings to `.../captures/<RUN_TAG>/config/capture_settings.env`
 - deletes RGB `exr` files by default so the final RGB directory only keeps `png` frames plus camera metadata
-- writes `rgb_first_frame.png`, `rgb_contact_sheet.png`, and `rgb_preview_stride*.gif` for quick inspection
+- writes `rgb_first_frame.png`, `rgb_contact_sheet.png`, and `rgb_preview_stride*.gif` under `.../captures/<RUN_TAG>/rgb/` for quick inspection
+- writes a scene-level depth histogram summary to `.../captures/<RUN_TAG>/stats/depth_histogram.{json,png}` when depth files are available
 
 ### Full
 
@@ -270,16 +273,37 @@ RGB_HEIGHT=480 \
 RGB_SAMPLES=32 \
 SL_MAX_SAMPLES=128 \
 bash scripts/launch/capture_existing_seed_scene.sh \
-    outputs/benchmark/structured_light_indoors/seed_42 \
+    outputs/benchmark/structured_light_indoors/seed_1 \
     full
 ```
 
 This mode:
 
-- reruns the whole-home trajectory into `trajectory_<RUN_TAG>/`
-- rerenders standard RGB into `seed_42_<RUN_TAG>_rgb/frames/`
+- reruns the whole-home trajectory into `captures/<RUN_TAG>/trajectory/`
+- rerenders standard RGB into `captures/<RUN_TAG>/rgb/frames/`
 - keeps RGB `png + exr + camview` by default
-- renders structured-light outputs into `seed_42/sl_frames_<RUN_TAG>/structured_light/`
+- renders structured-light outputs into `captures/<RUN_TAG>/structured_light/task/structured_light/`
+- exposes the structured-light frame directory at `captures/<RUN_TAG>/structured_light/frames/`
+- writes a scene-level depth histogram summary to `captures/<RUN_TAG>/stats/depth_histogram.{json,png}`
+
+The rerun layout is now:
+
+```text
+seed_<N>/
+├── coarse/
+└── captures/
+    └── <RUN_TAG>/
+        ├── config/
+        ├── logs/
+        ├── rgb/
+        │   ├── frames/
+        │   └── render_task/
+        ├── stats/
+        ├── structured_light/
+        │   ├── frames -> task/structured_light
+        │   └── task/
+        └── trajectory/
+```
 
 ### Main Knobs
 
@@ -287,6 +311,8 @@ Important trajectory controls:
 
 - `WALK_CAMERA_HEIGHT_M`
 - `WALK_FPS`
+- `WALK_TRAVERSAL_SPEED_MPS`
+- `WALK_ORBIT_SPEED_MPS`
 - `WALK_STEP_M`
 - `WALK_CLEARANCE_M`
 - `WALK_PATH_MARGIN_M`
@@ -294,6 +320,8 @@ Important trajectory controls:
 - `WALK_ROOM_SWEEP_YAW_SPEED_DEG_S`
 - `WALK_ENABLE_ROOM_ORBIT`
 - `WALK_ROOM_GRID_STEP_M`
+- `WALK_HEIGHT_PERTURBATION_AMPLITUDE_M`
+- `WALK_HEIGHT_PERTURBATION_FREQUENCY_HZ`
 - `WALK_FORCE_OPEN_ACCESS_DOORS`
 - `WALK_FORCE_OPEN_ACCESS_DOORS_MODE`
 
@@ -324,6 +352,8 @@ Operational controls:
 - `RUN_RGB_RENDER_IN_FULL=0` skips standard RGB in `full` mode
 - `RUN_STRUCTURED_LIGHT_IN_FULL=0` skips structured-light in `full` mode
 - `GENERATE_PREVIEW_ARTIFACTS=0` disables contact sheet and gif generation
+- `DEPTH_HISTOGRAM_ENABLED=0` disables scene-level depth histogram generation
+- `DEPTH_HISTOGRAM_BINS`, `DEPTH_HISTOGRAM_MIN_M`, and `DEPTH_HISTOGRAM_MAX_M` control histogram binning and clipping
 
 ## Parallelism Guidance
 
