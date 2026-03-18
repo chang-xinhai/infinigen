@@ -9,12 +9,10 @@ cameras:
   rgb:
     outputs:
       image:
-        - png
+        - exr
       depth:
-        - png
         - exr
       normal:
-        - png
         - exr
     calibration:
       intrinsic: true

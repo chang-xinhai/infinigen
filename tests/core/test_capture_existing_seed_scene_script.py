@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import infinigen
+import yaml
 
 
 def test_capture_existing_seed_scene_uses_manifest_capture_layout_and_depth_stats(tmp_path):
@@ -149,3 +150,15 @@ exit 0
     assert histogram["depth_files"] == ["output/rgb/depth/frame_0001.npy"]
     assert (capture_root / "stats" / "depth_histogram.png").exists()
     assert "Capture root:" in result.stdout
+
+
+def test_full_capture_manifest_rgb_outputs_are_exr_only():
+    repo_root = infinigen.repo_root()
+    manifest_path = repo_root / "infinigen_examples" / "configs_indoor" / "capture_manifests" / "full.yaml"
+
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    rgb_outputs = manifest["cameras"]["rgb"]["outputs"]
+
+    assert rgb_outputs["image"] == ["exr"]
+    assert rgb_outputs["depth"] == ["exr"]
+    assert rgb_outputs["normal"] == ["exr"]

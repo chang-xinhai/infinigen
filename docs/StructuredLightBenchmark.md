@@ -362,24 +362,34 @@ The selected manifest is copied to `capture/<setting>/config/capture_manifest.ya
 
 To customize outputs, create or edit the source manifest before running the script.
 
-For example, the default `full.yaml` currently writes RGB depth in both `png` and `exr`:
+The default `full.yaml` now keeps RGB image, depth, and normal in `exr` only:
 
 ```yaml
 cameras:
   rgb:
     outputs:
+      image:
+        - exr
       depth:
-        - png
+        - exr
+      normal:
         - exr
 ```
 
-If you want RGB depth to keep only `exr`, change it to:
+If you want a different format mix, edit the source manifest before capture. For example, to restore RGB image, depth, and normal `png` alongside `exr`, change it to:
 
 ```yaml
 cameras:
   rgb:
     outputs:
+      image:
+        - png
+        - exr
       depth:
+        - png
+        - exr
+      normal:
+        - png
         - exr
 ```
 
