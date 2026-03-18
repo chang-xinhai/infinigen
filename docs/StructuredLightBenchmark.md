@@ -316,6 +316,50 @@ seed_<N>/
             └── patterns/
 ```
 
+### SLURM Batch Reruns
+
+For multi-GPU reruns on already-generated scenes under `outputs/benchmark/structured_light_indoors/seed_<N>`, use:
+
+```bash
+bash scripts/launch/capture_existing_seed_scenes_parallel.sh [OUTPUT_ROOT] [SETTING]
+```
+
+The script:
+
+- scans `seed_*` directories under `OUTPUT_ROOT`
+- keeps only scenes with `coarse/scene.blend`
+- skips already-completed scenes by default when `capture/<setting>/output/calibration/calibration.npz` exists
+- dynamically assigns the remaining scenes across available GPUs so faster workers keep pulling new scenes
+- writes a batch summary to `OUTPUT_ROOT/logs/existing_seed_capture/summary_<setting>_<timestamp>.tsv`
+
+Recommended H100 submission flow with the current `scripts/submit.sh` resource request of `8` GPUs and `120` CPUs:
+
+```bash
+CONDA_ENV=infinigen_311 \
+MAX_PARALLEL_SCENES=8 \
+TOTAL_CPUS=120 \
+WALK_FPS=3 \
+WALK_STEP_M=0.15 \
+CAPTURE_WIDTH=848 \
+CAPTURE_HEIGHT=480 \
+SL_MAX_SAMPLES=128 \
+sbatch scripts/submit.sh \
+    bash scripts/launch/capture_existing_seed_scenes_parallel.sh \
+    outputs/benchmark/structured_light_indoors \
+    full
+```
+
+`scripts/submit.sh` now executes the payload directly inside the batch allocation by default instead of wrapping it in a nested `srun` step. This avoids cluster setups where `srun` fails host lookup during step launch with errors such as `Unable to resolve "node003"`. If your SLURM deployment requires `srun`, set `SUBMIT_USE_SRUN=1` in the submission environment.
+
+Useful overrides:
+
+- `SKIP_COMPLETED=0` forces rerender even when the done marker already exists
+- `GPU_IDS=0,1,2,3,4,5,6,7` pins the worker pool to an explicit GPU list
+- `MAX_PARALLEL_SCENES=<N>` reduces concurrency below the number of visible GPUs
+- `DONE_MARKER_REL=...` changes the completion check if you want a stricter or looser resume policy
+- `SUBMIT_USE_SRUN=1` restores the old nested-`srun` launch behavior if your cluster needs it
+- all single-scene knobs such as `WALK_*`, `CAPTURE_*`, `SL_MAX_SAMPLES`, and `CAPTURE_MANIFEST` are forwarded to `capture_existing_seed_scene.sh`
+
 ### Main Knobs
 
 Important trajectory controls:
@@ -362,21 +406,21 @@ The selected manifest is copied to `capture/<setting>/config/capture_manifest.ya
 
 To customize outputs, create or edit the source manifest before running the script.
 
-The default `full.yaml` now keeps RGB image, depth, and normal in `exr` only:
+The default `full.yaml` keeps RGB image in `png`, while depth and normal stay in `exr`:
 
 ```yaml
 cameras:
   rgb:
     outputs:
       image:
-        - exr
+        - png
       depth:
         - exr
       normal:
         - exr
 ```
 
-If you want a different format mix, edit the source manifest before capture. For example, to restore RGB image, depth, and normal `png` alongside `exr`, change it to:
+If you want a different format mix, edit the source manifest before capture. For example, to write both `png` and `exr` for RGB image while also exporting depth and normal in both formats, change it to:
 
 ```yaml
 cameras:

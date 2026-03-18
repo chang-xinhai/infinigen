@@ -9,7 +9,7 @@ cameras:
   rgb:
     outputs:
       image:
-        - exr
+        - png
       depth:
         - exr
       normal:

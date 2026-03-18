@@ -152,13 +152,13 @@ exit 0
     assert "Capture root:" in result.stdout
 
 
-def test_full_capture_manifest_rgb_outputs_are_exr_only():
+def test_full_capture_manifest_rgb_outputs_match_default_full_setting():
     repo_root = infinigen.repo_root()
     manifest_path = repo_root / "infinigen_examples" / "configs_indoor" / "capture_manifests" / "full.yaml"
 
     manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
     rgb_outputs = manifest["cameras"]["rgb"]["outputs"]
 
-    assert rgb_outputs["image"] == ["exr"]
+    assert rgb_outputs["image"] == ["png"]
     assert rgb_outputs["depth"] == ["exr"]
     assert rgb_outputs["normal"] == ["exr"]
