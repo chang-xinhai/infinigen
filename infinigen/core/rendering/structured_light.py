@@ -35,6 +35,10 @@ from infinigen.core.rendering.post_render import (
     load_depth,
     load_normals,
 )
+from infinigen.core.rendering.render import (
+    _configure_preview_cycles,
+    _ensure_preview_lighting,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -454,7 +458,7 @@ class StructuredLightRig:
         }
 
 
-def _resolve_pattern_paths(sl_pattern_dir, sl_pattern_white, sl_pattern_names):
+def _resolve_pattern_specs(sl_pattern_dir, sl_pattern_white, sl_pattern_names):
     if sl_pattern_dir is None:
         candidate = Path(__file__).resolve().parents[3] / "data" / "patterns"
         if candidate.is_dir():
@@ -468,10 +472,9 @@ def _resolve_pattern_paths(sl_pattern_dir, sl_pattern_white, sl_pattern_names):
                 candidate,
             )
 
-    pattern_paths = []
     white_pattern_path = None
     if sl_pattern_dir is None:
-        return None, white_pattern_path, pattern_paths
+        return None, white_pattern_path, []
 
     pattern_dir = Path(sl_pattern_dir).expanduser()
     white_candidate = pattern_dir / sl_pattern_white
@@ -486,6 +489,7 @@ def _resolve_pattern_paths(sl_pattern_dir, sl_pattern_white, sl_pattern_names):
             continue
         available_files[candidate.stem.lower()] = candidate
 
+    pattern_specs = []
     names = [str(name).strip() for name in (sl_pattern_names or []) if str(name).strip()]
     for pattern_name in names:
         candidate = available_files.get(pattern_name.lower())
@@ -493,9 +497,14 @@ def _resolve_pattern_paths(sl_pattern_dir, sl_pattern_white, sl_pattern_names):
             raise FileNotFoundError(
                 f"Structured-light pattern '{pattern_name}' not found under {pattern_dir}"
             )
-        pattern_paths.append(candidate)
+        pattern_specs.append(
+            {
+                "name": pattern_name,
+                "path": candidate,
+            }
+        )
 
-    return pattern_dir, white_pattern_path, pattern_paths
+    return pattern_dir, white_pattern_path, pattern_specs
 
 
 def _build_rgb_render_plan(output_root, manifest):
@@ -566,6 +575,26 @@ def _record_requested_extrinsics(rig, manifest):
     return extrinsic
 
 
+def _capture_cycles_state(scene):
+    cycles = scene.cycles
+    return {
+        "use_denoising": cycles.use_denoising,
+        "caustics_reflective": cycles.caustics_reflective,
+        "caustics_refractive": cycles.caustics_refractive,
+        "sample_clamp_indirect": cycles.sample_clamp_indirect,
+        "sample_clamp_direct": cycles.sample_clamp_direct,
+    }
+
+
+def _restore_cycles_state(scene, state):
+    cycles = scene.cycles
+    cycles.use_denoising = state["use_denoising"]
+    cycles.caustics_reflective = state["caustics_reflective"]
+    cycles.caustics_refractive = state["caustics_refractive"]
+    cycles.sample_clamp_indirect = state["sample_clamp_indirect"]
+    cycles.sample_clamp_direct = state["sample_clamp_direct"]
+
+
 def _resolve_target_path(template_path, frame_tag):
     if template_path is None:
         return None
@@ -626,6 +655,16 @@ def render_structured_light(
     sl_capture_manifest_path=None,
     sl_max_samples=64,
     sl_exr_depth=16,
+    sl_preview_force_lighting=True,
+    sl_preview_world_strength=0.25,
+    sl_preview_sun_energy=1.0,
+    sl_preview_sun_rotation_deg=(55.0, 0.0, 35.0),
+    sl_preview_camera_light_energy=120.0,
+    sl_preview_camera_light_offset_m=(0.0, 0.0, 0.15),
+    sl_preview_force_denoising=True,
+    sl_preview_disable_caustics=True,
+    sl_preview_sample_clamp_indirect=0.75,
+    sl_preview_sample_clamp_direct=2.5,
 ):
     tic = time.time()
 
@@ -644,7 +683,7 @@ def render_structured_light(
     if manifest_patterns.get("white"):
         sl_pattern_white = manifest_patterns["white"]
 
-    pattern_dir, white_pattern_path, pattern_paths = _resolve_pattern_paths(
+    pattern_dir, white_pattern_path, pattern_specs = _resolve_pattern_specs(
         sl_pattern_dir=sl_pattern_dir,
         sl_pattern_white=sl_pattern_white,
         sl_pattern_names=sl_pattern_names,
@@ -678,6 +717,16 @@ def render_structured_light(
 
     orig_env_strength = rig.set_env_strength(0)
     rig.set_env_strength(orig_env_strength)
+    base_cycles_state = _capture_cycles_state(scene)
+    _ensure_preview_lighting(
+        rig.rgb_cam,
+        preview_force_lighting=sl_preview_force_lighting,
+        preview_world_strength=sl_preview_world_strength,
+        preview_sun_energy=sl_preview_sun_energy,
+        preview_sun_rotation_deg=tuple(sl_preview_sun_rotation_deg),
+        preview_camera_light_energy=sl_preview_camera_light_energy,
+        preview_camera_light_offset_m=tuple(sl_preview_camera_light_offset_m),
+    )
 
     frame_start = scene.frame_start
     frame_end = scene.frame_end
@@ -691,10 +740,18 @@ def render_structured_light(
         _camera_requires_render(manifest, camera_key, "image")
         for camera_key in ("left", "right")
     )
-    if want_pattern_images and not pattern_paths:
+    if want_pattern_images and not pattern_specs:
         logger.warning(
             "Capture manifest requested left/right pattern renders but no pattern files were resolved"
         )
+
+    pattern_output.mkdir(parents=True, exist_ok=True)
+    if white_pattern_path is not None:
+        shutil.copy2(white_pattern_path, pattern_output / Path(sl_pattern_white).name)
+    if pattern_dir is not None:
+        for pattern_spec in pattern_specs:
+            dst_name = f"{pattern_spec['name']}{pattern_spec['path'].suffix.lower()}"
+            shutil.copy2(pattern_spec["path"], pattern_output / dst_name)
 
     for frame_idx in range(frame_start, frame_end + 1):
         scene.frame_set(frame_idx)
@@ -716,6 +773,12 @@ def render_structured_light(
         frame_tag = f"{frame_idx:04d}"
 
         if want_rgb:
+            _configure_preview_cycles(
+                preview_force_denoising=sl_preview_force_denoising,
+                preview_disable_caustics=sl_preview_disable_caustics,
+                preview_sample_clamp_indirect=sl_preview_sample_clamp_indirect,
+                preview_sample_clamp_direct=sl_preview_sample_clamp_direct,
+            )
             if white_pattern_path is not None:
                 rig.set_pattern(str(white_pattern_path))
                 rig.set_projector_visible(True)
@@ -731,13 +794,14 @@ def render_structured_light(
                 exr_depth=sl_exr_depth,
             )
 
-        if want_pattern_images and pattern_paths:
+        if want_pattern_images and pattern_specs:
+            _restore_cycles_state(scene, base_cycles_state)
             rig.set_projector_visible(True)
             rig.set_scene_lights(False)
             rig.set_env_strength(0)
-            for pattern_path in pattern_paths:
-                pattern_name = pattern_path.stem
-                rig.set_pattern(str(pattern_path))
+            for pattern_spec in pattern_specs:
+                pattern_name = pattern_spec["name"]
+                rig.set_pattern(str(pattern_spec["path"]))
                 for camera_key, cam_obj in (
                     ("left", rig.left_cam),
                     ("right", rig.right_cam),
@@ -763,7 +827,7 @@ def render_structured_light(
     calibration_payload = rig.build_calibration_dict(
         frame_ids=frame_ids,
         extrinsics=extrinsics,
-        patterns=[path.stem for path in pattern_paths],
+        patterns=[spec["name"] for spec in pattern_specs],
         manifest_setting=str(manifest.get("setting", "full")),
     )
     calibration_cfg = manifest.get("calibration", {})
@@ -773,13 +837,6 @@ def render_structured_light(
         save_npz=bool(calibration_cfg.get("save_npz", True)),
         save_jsonl=bool(calibration_cfg.get("save_jsonl", False)),
     )
-
-    pattern_output.mkdir(parents=True, exist_ok=True)
-    if pattern_dir is not None:
-        for pattern_path in pattern_paths:
-            shutil.copy2(pattern_path, pattern_output / pattern_path.name)
-        if white_pattern_path is not None:
-            shutil.copy2(white_pattern_path, pattern_output / white_pattern_path.name)
 
     logger.info("Structured light rendering complete in %.1fs", time.time() - tic)
     logger.info("Capture output: %s", capture_root)

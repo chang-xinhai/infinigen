@@ -38,3 +38,11 @@ render_structured_light.sl_capture_manifest_path = None
 # ── Render quality ────────────────────────────────────────────
 render_structured_light.sl_max_samples = 64
 render_structured_light.sl_exr_depth = 16
+render_structured_light.sl_preview_force_lighting = True
+render_structured_light.sl_preview_world_strength = 0.25
+render_structured_light.sl_preview_sun_energy = 1.0
+render_structured_light.sl_preview_camera_light_energy = 120.0
+render_structured_light.sl_preview_force_denoising = True
+render_structured_light.sl_preview_disable_caustics = True
+render_structured_light.sl_preview_sample_clamp_indirect = 0.75
+render_structured_light.sl_preview_sample_clamp_direct = 2.5

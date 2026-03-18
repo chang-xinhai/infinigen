@@ -83,6 +83,14 @@ CAPTURE_HEIGHT="${CAPTURE_HEIGHT:-${RGB_HEIGHT:-480}}"
 SL_MAX_SAMPLES="${SL_MAX_SAMPLES:-128}"
 SL_PATTERN_DIR="${SL_PATTERN_DIR:-}"
 SL_PATTERN_WHITE="${SL_PATTERN_WHITE:-white.png}"
+RGB_FORCE_LIGHTING="${RGB_FORCE_LIGHTING:-True}"
+RGB_WORLD_STRENGTH="${RGB_WORLD_STRENGTH:-0.25}"
+RGB_SUN_ENERGY="${RGB_SUN_ENERGY:-1.0}"
+RGB_CAMERA_LIGHT_ENERGY="${RGB_CAMERA_LIGHT_ENERGY:-120.0}"
+RGB_FORCE_DENOISING="${RGB_FORCE_DENOISING:-True}"
+RGB_DISABLE_CAUSTICS="${RGB_DISABLE_CAUSTICS:-True}"
+RGB_SAMPLE_CLAMP_INDIRECT="${RGB_SAMPLE_CLAMP_INDIRECT:-0.75}"
+RGB_SAMPLE_CLAMP_DIRECT="${RGB_SAMPLE_CLAMP_DIRECT:-2.5}"
 
 DEPTH_HISTOGRAM_ENABLED="${DEPTH_HISTOGRAM_ENABLED:-1}"
 DEPTH_HISTOGRAM_BINS="${DEPTH_HISTOGRAM_BINS:-80}"
@@ -138,6 +146,14 @@ CAPTURE_OVERRIDES=(
     "render_structured_light.sl_resolution_y=${CAPTURE_HEIGHT}"
     "render_structured_light.sl_max_samples=${SL_MAX_SAMPLES}"
     "render_structured_light.sl_pattern_white=\"${SL_PATTERN_WHITE}\""
+    "render_structured_light.sl_preview_force_lighting=${RGB_FORCE_LIGHTING}"
+    "render_structured_light.sl_preview_world_strength=${RGB_WORLD_STRENGTH}"
+    "render_structured_light.sl_preview_sun_energy=${RGB_SUN_ENERGY}"
+    "render_structured_light.sl_preview_camera_light_energy=${RGB_CAMERA_LIGHT_ENERGY}"
+    "render_structured_light.sl_preview_force_denoising=${RGB_FORCE_DENOISING}"
+    "render_structured_light.sl_preview_disable_caustics=${RGB_DISABLE_CAUSTICS}"
+    "render_structured_light.sl_preview_sample_clamp_indirect=${RGB_SAMPLE_CLAMP_INDIRECT}"
+    "render_structured_light.sl_preview_sample_clamp_direct=${RGB_SAMPLE_CLAMP_DIRECT}"
 )
 
 if [[ -n "${SL_PATTERN_DIR}" ]]; then
@@ -176,6 +192,14 @@ write_capture_settings() {
         echo "CAPTURE_WIDTH=${CAPTURE_WIDTH}"
         echo "CAPTURE_HEIGHT=${CAPTURE_HEIGHT}"
         echo "SL_MAX_SAMPLES=${SL_MAX_SAMPLES}"
+        echo "RGB_FORCE_LIGHTING=${RGB_FORCE_LIGHTING}"
+        echo "RGB_WORLD_STRENGTH=${RGB_WORLD_STRENGTH}"
+        echo "RGB_SUN_ENERGY=${RGB_SUN_ENERGY}"
+        echo "RGB_CAMERA_LIGHT_ENERGY=${RGB_CAMERA_LIGHT_ENERGY}"
+        echo "RGB_FORCE_DENOISING=${RGB_FORCE_DENOISING}"
+        echo "RGB_DISABLE_CAUSTICS=${RGB_DISABLE_CAUSTICS}"
+        echo "RGB_SAMPLE_CLAMP_INDIRECT=${RGB_SAMPLE_CLAMP_INDIRECT}"
+        echo "RGB_SAMPLE_CLAMP_DIRECT=${RGB_SAMPLE_CLAMP_DIRECT}"
         echo "WALK_FPS=${WALK_FPS}"
         echo "WALK_TRAVERSAL_SPEED_MPS=${WALK_TRAVERSAL_SPEED_MPS}"
         echo "WALK_STEP_M=${WALK_STEP_M}"
@@ -278,10 +302,16 @@ print_summary() {
     echo "Render log: ${RENDER_LOG}"
 }
 
+prune_empty_dirs() {
+    rmdir "${CAPTURE_ROOT}/assets" 2>/dev/null || true
+    rmdir "${STATS_DIR}" 2>/dev/null || true
+}
+
 : >"${RENDER_LOG}"
 write_capture_settings
 print_header
 run_trajectory
 run_capture
 run_depth_histogram
+prune_empty_dirs
 print_summary
