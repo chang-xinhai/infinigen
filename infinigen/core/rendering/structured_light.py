@@ -16,6 +16,7 @@
 import copy
 import json
 import logging
+import os
 import shutil
 import tempfile
 import time
@@ -92,6 +93,102 @@ DEFAULT_CAPTURE_MANIFEST = {
     },
 }
 
+
+def _calibration_header_from_payload(calibration_payload):
+    return {
+        "type": "rig",
+        "setting": calibration_payload["setting"],
+        "baseline": calibration_payload["baseline"],
+        "intrinsic": calibration_payload["intrinsic"],
+        "rel_R": calibration_payload["rel_R"],
+        "rel_T": calibration_payload["rel_T"],
+        "patterns": calibration_payload["patterns"],
+    }
+
+
+def _frame_calibration_record(frame_id, extrinsic):
+    return {
+        "type": "frame",
+        "frame": int(frame_id),
+        "extrinsic": extrinsic,
+    }
+
+
+def _write_jsonl_atomic(path, records):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=f"{path.stem}_", suffix=path.suffix, dir=str(path.parent)
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            for record in records:
+                handle.write(json.dumps(record) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+
+def _rewrite_incremental_calibration(progress_path, header, frame_records):
+    records = [header]
+    for frame_id in sorted(frame_records):
+        records.append(_frame_calibration_record(frame_id, frame_records[frame_id]))
+    _write_jsonl_atomic(progress_path, records)
+
+
+def _append_incremental_calibration_frame(progress_path, frame_id, extrinsic):
+    progress_path = Path(progress_path)
+    progress_path.parent.mkdir(parents=True, exist_ok=True)
+    with progress_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(_frame_calibration_record(frame_id, extrinsic)) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _load_incremental_calibration(progress_path):
+    progress_path = Path(progress_path)
+    if not progress_path.exists():
+        return None, {}
+
+    header = None
+    frame_records = {}
+    with progress_path.open("r", encoding="utf-8") as handle:
+        for lineno, raw_line in enumerate(handle, start=1):
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                logger.warning(
+                    "Ignoring malformed calibration progress line %s:%d",
+                    progress_path,
+                    lineno,
+                )
+                continue
+            record_type = payload.get("type")
+            if record_type == "rig":
+                header = payload
+            elif record_type == "frame":
+                frame_id = payload.get("frame")
+                extrinsic = payload.get("extrinsic")
+                if frame_id is None or extrinsic is None:
+                    logger.warning(
+                        "Ignoring incomplete calibration frame record %s:%d",
+                        progress_path,
+                        lineno,
+                    )
+                    continue
+                frame_records[int(frame_id)] = extrinsic
+    return header, frame_records
+
+
+def _calibration_headers_compatible(existing_header, expected_header):
+    return existing_header == expected_header
+
 def _deep_merge(dst, src):
     for key, value in src.items():
         if isinstance(value, dict) and isinstance(dst.get(key), dict):
@@ -99,6 +196,18 @@ def _deep_merge(dst, src):
         else:
             dst[key] = value
     return dst
+
+
+def _apply_manifest_override_sections(manifest, loaded):
+    for camera_key, camera_cfg in loaded.get("cameras", {}).items():
+        if not isinstance(camera_cfg, dict):
+            continue
+        manifest_camera_cfg = manifest.setdefault("cameras", {}).setdefault(camera_key, {})
+        if "outputs" in camera_cfg:
+            manifest_camera_cfg["outputs"] = copy.deepcopy(camera_cfg["outputs"])
+        if "calibration" in camera_cfg:
+            manifest_camera_cfg["calibration"] = copy.deepcopy(camera_cfg["calibration"])
+    return manifest
 
 
 def _load_capture_manifest(path):
@@ -111,7 +220,8 @@ def _load_capture_manifest(path):
         loaded = yaml.safe_load(handle) or {}
     if not isinstance(loaded, dict):
         raise ValueError(f"Capture manifest must be a mapping: {manifest_path}")
-    return _deep_merge(manifest, loaded)
+    manifest = _deep_merge(manifest, loaded)
+    return _apply_manifest_override_sections(manifest, loaded)
 
 
 def _normalize_formats(formats):
@@ -145,6 +255,15 @@ def _camera_requires_render(manifest, camera_key, modality):
 def _camera_wants_extrinsic(manifest, camera_key):
     camera_cfg = _camera_manifest(manifest, camera_key)
     return bool(camera_cfg.get("calibration", {}).get("extrinsic", False))
+
+
+def _resolve_manifest_pattern_config(manifest, sl_pattern_names, sl_pattern_white):
+    manifest_patterns = manifest.get("patterns", {})
+    if "names" in manifest_patterns:
+        sl_pattern_names = manifest_patterns["names"]
+    if "white" in manifest_patterns and manifest_patterns["white"] is not None:
+        sl_pattern_white = manifest_patterns["white"]
+    return sl_pattern_names, sl_pattern_white
 
 
 @gin.configurable
@@ -507,6 +626,15 @@ def _resolve_pattern_specs(sl_pattern_dir, sl_pattern_white, sl_pattern_names):
     return pattern_dir, white_pattern_path, pattern_specs
 
 
+def _resolve_pattern_paths(sl_pattern_dir, sl_pattern_white, sl_pattern_names):
+    pattern_dir, white_pattern_path, pattern_specs = _resolve_pattern_specs(
+        sl_pattern_dir=sl_pattern_dir,
+        sl_pattern_white=sl_pattern_white,
+        sl_pattern_names=sl_pattern_names,
+    )
+    return pattern_dir, white_pattern_path, [spec["path"] for spec in pattern_specs]
+
+
 def _build_rgb_render_plan(output_root, manifest):
     rgb_root = output_root / "rgb"
     return {
@@ -572,6 +700,42 @@ def _build_pattern_render_plan(output_root, camera_key, pattern_name, manifest):
     }
 
 
+def _iter_frame_output_targets(output_root, manifest, pattern_specs, frame_tag):
+    rgb_plan = _build_rgb_render_plan(output_root, manifest)
+    for target in rgb_plan.values():
+        resolved = _resolve_target_path(target, frame_tag)
+        if resolved is not None:
+            yield resolved
+
+    for pattern_spec in pattern_specs:
+        pattern_name = pattern_spec["name"]
+        for camera_key in ("left", "right"):
+            plan = _build_pattern_render_plan(
+                output_root=output_root,
+                camera_key=camera_key,
+                pattern_name=pattern_name,
+                manifest=manifest,
+            )
+            for target in plan.values():
+                resolved = _resolve_target_path(target, frame_tag)
+                if resolved is not None:
+                    yield resolved
+
+
+def _frame_outputs_complete(output_root, manifest, pattern_specs, frame_tag):
+    expected_paths = list(
+        _iter_frame_output_targets(
+            output_root=output_root,
+            manifest=manifest,
+            pattern_specs=pattern_specs,
+            frame_tag=frame_tag,
+        )
+    )
+    if not expected_paths:
+        return True
+    return all(path.exists() for path in expected_paths)
+
+
 def _record_requested_extrinsics(rig, manifest):
     extrinsic = {}
     if _camera_wants_extrinsic(manifest, "left"):
@@ -616,28 +780,13 @@ def _save_calibration(calibration_dir, calibration_payload, save_npz, save_jsonl
 
     if save_jsonl:
         with (calibration_dir / "calibration.jsonl").open("w", encoding="utf-8") as handle:
-            header = {
-                "type": "rig",
-                "setting": calibration_payload["setting"],
-                "baseline": calibration_payload["baseline"],
-                "intrinsic": calibration_payload["intrinsic"],
-                "rel_R": calibration_payload["rel_R"],
-                "rel_T": calibration_payload["rel_T"],
-                "patterns": calibration_payload["patterns"],
-            }
+            header = _calibration_header_from_payload(calibration_payload)
             handle.write(json.dumps(header) + "\n")
             for frame_id, extrinsic in zip(
                 calibration_payload["frame_ids"], calibration_payload["extrinsic"]
             ):
                 handle.write(
-                    json.dumps(
-                        {
-                            "type": "frame",
-                            "frame": frame_id,
-                            "extrinsic": extrinsic,
-                        }
-                    )
-                    + "\n"
+                    json.dumps(_frame_calibration_record(frame_id, extrinsic)) + "\n"
                 )
 
 
@@ -673,6 +822,9 @@ def render_structured_light(
     sl_preview_disable_caustics=True,
     sl_preview_sample_clamp_indirect=0.75,
     sl_preview_sample_clamp_direct=2.5,
+    sl_resume=False,
+    sl_resume_from_frame=None,
+    sl_frame_index_offset=0,
 ):
     tic = time.time()
 
@@ -681,15 +833,16 @@ def render_structured_light(
     metadata_root = capture_root / "structured_light"
     pattern_output = metadata_root / "patterns"
     calibration_dir = output_root / "calibration"
+    calibration_progress_path = calibration_dir / "calibration.jsonl"
     output_root.mkdir(parents=True, exist_ok=True)
     metadata_root.mkdir(parents=True, exist_ok=True)
 
     manifest = _load_capture_manifest(sl_capture_manifest_path)
-    manifest_patterns = manifest.get("patterns", {})
-    if sl_pattern_names is None:
-        sl_pattern_names = manifest_patterns.get("names")
-    if manifest_patterns.get("white"):
-        sl_pattern_white = manifest_patterns["white"]
+    sl_pattern_names, sl_pattern_white = _resolve_manifest_pattern_config(
+        manifest=manifest,
+        sl_pattern_names=sl_pattern_names,
+        sl_pattern_white=sl_pattern_white,
+    )
 
     pattern_dir, white_pattern_path, pattern_specs = _resolve_pattern_specs(
         sl_pattern_dir=sl_pattern_dir,
@@ -739,8 +892,6 @@ def render_structured_light(
     frame_start = scene.frame_start
     frame_end = scene.frame_end
     cam_rig = camera.parent
-    frame_ids = []
-    extrinsics = []
 
     rgb_plan = _build_rgb_render_plan(output_root, manifest)
     want_rgb = any(rgb_plan.values())
@@ -761,7 +912,37 @@ def render_structured_light(
             dst_name = f"{pattern_spec['name']}{pattern_spec['path'].suffix.lower()}"
             shutil.copy2(pattern_spec["path"], pattern_output / dst_name)
 
-    for capture_frame_idx, scene_frame_idx in enumerate(range(frame_start, frame_end + 1)):
+    expected_calibration_payload = rig.build_calibration_dict(
+        frame_ids=[],
+        extrinsics=[],
+        patterns=[spec["name"] for spec in pattern_specs],
+        manifest_setting=str(manifest.get("setting", "full")),
+    )
+    expected_header = _calibration_header_from_payload(expected_calibration_payload)
+
+    existing_header = None
+    existing_frame_records = {}
+    if sl_resume:
+        existing_header, existing_frame_records = _load_incremental_calibration(
+            calibration_progress_path
+        )
+        if existing_header is not None and not _calibration_headers_compatible(
+            existing_header, expected_header
+        ):
+            raise ValueError(
+                f"Incompatible calibration progress file at {calibration_progress_path}"
+            )
+
+    frame_records = dict(existing_frame_records) if sl_resume else {}
+    _rewrite_incremental_calibration(
+        calibration_progress_path,
+        expected_header,
+        frame_records,
+    )
+
+    for local_frame_idx, scene_frame_idx in enumerate(range(frame_start, frame_end + 1)):
+        capture_frame_idx = int(sl_frame_index_offset) + local_frame_idx
+        frame_tag = f"{capture_frame_idx:04d}"
         scene.frame_set(scene_frame_idx)
         bpy.context.view_layer.update()
 
@@ -776,9 +957,32 @@ def render_structured_light(
                 camera.matrix_world.to_3x3(),
             )
 
-        frame_ids.append(capture_frame_idx)
-        extrinsics.append(_record_requested_extrinsics(rig, manifest))
-        frame_tag = f"{capture_frame_idx:04d}"
+        frame_extrinsic = _record_requested_extrinsics(rig, manifest)
+        frame_complete = _frame_outputs_complete(
+            output_root=output_root,
+            manifest=manifest,
+            pattern_specs=pattern_specs,
+            frame_tag=frame_tag,
+        )
+        has_calibration = capture_frame_idx in frame_records
+        should_skip_for_resume = False
+        if sl_resume:
+            if sl_resume_from_frame is not None and capture_frame_idx < int(
+                sl_resume_from_frame
+            ):
+                should_skip_for_resume = True
+            elif frame_complete:
+                should_skip_for_resume = True
+
+        if should_skip_for_resume:
+            if frame_complete and not has_calibration:
+                frame_records[capture_frame_idx] = frame_extrinsic
+                _append_incremental_calibration_frame(
+                    calibration_progress_path,
+                    capture_frame_idx,
+                    frame_extrinsic,
+                )
+            continue
 
         if want_rgb:
             _configure_preview_cycles(
@@ -831,7 +1035,15 @@ def render_structured_light(
 
         rig.set_scene_lights(True)
         rig.set_env_strength(orig_env_strength)
+        frame_records[capture_frame_idx] = frame_extrinsic
+        _append_incremental_calibration_frame(
+            calibration_progress_path,
+            capture_frame_idx,
+            frame_extrinsic,
+        )
 
+    frame_ids = sorted(frame_records)
+    extrinsics = [frame_records[frame_id] for frame_id in frame_ids]
     calibration_payload = rig.build_calibration_dict(
         frame_ids=frame_ids,
         extrinsics=extrinsics,
@@ -843,7 +1055,7 @@ def render_structured_light(
         calibration_dir=calibration_dir,
         calibration_payload=calibration_payload,
         save_npz=bool(calibration_cfg.get("save_npz", True)),
-        save_jsonl=bool(calibration_cfg.get("save_jsonl", False)),
+        save_jsonl=True,
     )
 
     logger.info("Structured light rendering complete in %.1fs", time.time() - tic)

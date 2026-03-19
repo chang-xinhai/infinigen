@@ -26,7 +26,7 @@ def test_parallel_existing_seed_capture_skips_completed_and_sets_worker_env(tmp_
     seed_1 = _make_seed(output_root, 1)
     seed_2 = _make_seed(output_root, 2)
 
-    completed_marker = seed_1 / "capture" / "full" / "output" / "calibration" / "calibration.npz"
+    completed_marker = seed_1 / "capture" / "full" / "output" / "calibration" / "capture_complete.json"
     completed_marker.parent.mkdir(parents=True, exist_ok=True)
     completed_marker.write_text("", encoding="utf-8")
 
@@ -41,7 +41,7 @@ capture_root="$scene_dir/capture/$setting"
 mkdir -p "$capture_root/output/calibration"
 printf 'gpu=%s\\nthreads=%s\\n' "${CUDA_VISIBLE_DEVICES:-unset}" "${OMP_NUM_THREADS:-unset}" \
     > "$capture_root/worker_env.txt"
-touch "$capture_root/output/calibration/calibration.npz"
+touch "$capture_root/output/calibration/capture_complete.json"
 """,
         encoding="utf-8",
     )
@@ -74,7 +74,7 @@ touch "$capture_root/output/calibration/calibration.npz"
         worker_env = (scene_dir / "capture" / "full" / "worker_env.txt").read_text(encoding="utf-8")
         assert "threads=3" in worker_env
         assert "gpu=2" in worker_env or "gpu=5" in worker_env
-        assert (scene_dir / "capture" / "full" / "output" / "calibration" / "calibration.npz").exists()
+        assert (scene_dir / "capture" / "full" / "output" / "calibration" / "capture_complete.json").exists()
 
     assert not (seed_1 / "capture" / "full" / "worker_env.txt").exists()
 
@@ -112,7 +112,7 @@ if [[ "$scene_name" == "seed_1" ]]; then
     exit 9
 fi
 
-touch "$capture_root/output/calibration/calibration.npz"
+touch "$capture_root/output/calibration/capture_complete.json"
 """,
         encoding="utf-8",
     )
@@ -138,9 +138,9 @@ touch "$capture_root/output/calibration/calibration.npz"
     )
 
     assert result.returncode == 1
-    assert (output_root / "seed_0" / "capture" / "full" / "output" / "calibration" / "calibration.npz").exists()
-    assert (output_root / "seed_2" / "capture" / "full" / "output" / "calibration" / "calibration.npz").exists()
-    assert not (output_root / "seed_1" / "capture" / "full" / "output" / "calibration" / "calibration.npz").exists()
+    assert (output_root / "seed_0" / "capture" / "full" / "output" / "calibration" / "capture_complete.json").exists()
+    assert (output_root / "seed_2" / "capture" / "full" / "output" / "calibration" / "capture_complete.json").exists()
+    assert not (output_root / "seed_1" / "capture" / "full" / "output" / "calibration" / "capture_complete.json").exists()
 
     summary_files = sorted((output_root / "logs" / "existing_seed_capture").glob("summary_full_*.tsv"))
     assert summary_files
@@ -149,3 +149,47 @@ touch "$capture_root/output/calibration/calibration.npz"
     assert "seed_1\tfailed(9)\t" in summary_text
     assert "seed_2\tsuccess\t" in summary_text
     assert "Failed scenes: 1" in result.stdout
+
+
+def test_parallel_existing_seed_capture_does_not_treat_calibration_npz_as_complete(tmp_path):
+    repo_root = infinigen.repo_root()
+    script_path = repo_root / "scripts/launch/capture_existing_seed_scenes_parallel.sh"
+    fake_capture = tmp_path / "fake_capture.sh"
+    output_root = tmp_path / "outputs" / "benchmark" / "structured_light_indoors"
+
+    seed_0 = _make_seed(output_root, 0)
+    calibration_npz = seed_0 / "capture" / "full" / "output" / "calibration" / "calibration.npz"
+    calibration_npz.parent.mkdir(parents=True, exist_ok=True)
+    calibration_npz.write_text("", encoding="utf-8")
+
+    fake_capture.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+
+scene_dir="$1"
+setting="$2"
+capture_root="$scene_dir/capture/$setting"
+
+mkdir -p "$capture_root/output/calibration"
+touch "$capture_root/output/calibration/capture_complete.json"
+""",
+        encoding="utf-8",
+    )
+    fake_capture.chmod(fake_capture.stat().st_mode | stat.S_IEXEC)
+
+    env = os.environ.copy()
+    env.update({"CAPTURE_SCRIPT": str(fake_capture), "GPU_IDS": "0"})
+
+    result = subprocess.run(
+        ["bash", str(script_path), str(output_root), "full"],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Pending scenes: 1" in result.stdout
+    assert "Skipped completed: 0" in result.stdout
+    assert (seed_0 / "capture" / "full" / "output" / "calibration" / "capture_complete.json").exists()

@@ -6,6 +6,13 @@ import numpy as np
 import infinigen
 from infinigen.core.rendering.structured_light import (
     StructuredLightRig,
+    _append_incremental_calibration_frame,
+    _calibration_header_from_payload,
+    _frame_outputs_complete,
+    _load_capture_manifest,
+    _load_incremental_calibration,
+    _resolve_manifest_pattern_config,
+    _rewrite_incremental_calibration,
     _resolve_pattern_paths,
 )
 
@@ -77,3 +84,126 @@ def test_structured_light_default_patterns_resolve_from_repo_assets():
         "D435.png",
         "kinectsp.png",
     ]
+
+
+def test_structured_light_frame_outputs_complete_uses_manifest_and_patterns(tmp_path):
+    manifest = _load_capture_manifest(
+        infinigen.repo_root()
+        / "infinigen_examples"
+        / "configs_indoor"
+        / "capture_manifests"
+        / "full.yaml"
+    )
+    output_root = tmp_path / "output"
+    frame_tag = "0003"
+    pattern_specs = [{"name": name, "path": tmp_path / f"{name}.png"} for name in ("d415", "d435", "kinectsp")]
+
+    assert not _frame_outputs_complete(output_root, manifest, pattern_specs, frame_tag)
+
+    required_paths = [
+        output_root / "rgb" / "image" / f"frame_{frame_tag}.png",
+        output_root / "rgb" / "depth" / f"frame_{frame_tag}.exr",
+        output_root / "rgb" / "normal" / f"frame_{frame_tag}.exr",
+    ]
+    for pattern_name in ("d415", "d435", "kinectsp"):
+        required_paths.append(
+            output_root / "IR_left" / "image" / pattern_name / f"frame_{frame_tag}.png"
+        )
+        required_paths.append(
+            output_root / "IR_right" / "image" / pattern_name / f"frame_{frame_tag}.png"
+        )
+    for path in required_paths:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("", encoding="utf-8")
+
+    assert _frame_outputs_complete(output_root, manifest, pattern_specs, frame_tag)
+
+
+def test_structured_light_incremental_calibration_loader_tolerates_truncated_tail(tmp_path):
+    progress_path = tmp_path / "calibration.jsonl"
+    payload = {
+        "setting": "full",
+        "baseline": 0.055,
+        "intrinsic": {"RGB": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]},
+        "rel_R": {"RGB": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]},
+        "rel_T": {"RGB": [0, 0, 0]},
+        "frame_ids": [],
+        "extrinsic": [],
+        "patterns": ["d415"],
+    }
+    header = _calibration_header_from_payload(payload)
+    _rewrite_incremental_calibration(progress_path, header, {0: {"RGB": [[1, 0, 0, 0]]}})
+    _append_incremental_calibration_frame(progress_path, 2, {"RGB": [[2, 0, 0, 0]]})
+    with progress_path.open("a", encoding="utf-8") as handle:
+        handle.write('{"type":"frame","frame":3')
+
+    loaded_header, frame_records = _load_incremental_calibration(progress_path)
+
+    assert loaded_header == header
+    assert frame_records[0] == {"RGB": [[1, 0, 0, 0]]}
+    assert frame_records[2] == {"RGB": [[2, 0, 0, 0]]}
+    assert 3 not in frame_records
+
+
+def test_manifest_pattern_config_overrides_gin_defaults():
+    manifest = {
+        "patterns": {
+            "names": ["d415"],
+            "white": "manifest_white.png",
+        }
+    }
+
+    pattern_names, pattern_white = _resolve_manifest_pattern_config(
+        manifest=manifest,
+        sl_pattern_names=["d415", "d435", "kinectsp"],
+        sl_pattern_white="white.png",
+    )
+
+    assert pattern_names == ["d415"]
+    assert pattern_white == "manifest_white.png"
+
+
+def test_manifest_pattern_config_can_explicitly_disable_patterns():
+    manifest = {
+        "patterns": {
+            "names": [],
+            "white": "manifest_white.png",
+        }
+    }
+
+    pattern_names, pattern_white = _resolve_manifest_pattern_config(
+        manifest=manifest,
+        sl_pattern_names=["d415", "d435", "kinectsp"],
+        sl_pattern_white="white.png",
+    )
+
+    assert pattern_names == []
+    assert pattern_white == "manifest_white.png"
+
+
+def test_debug_manifest_does_not_inherit_default_rgb_normal_outputs():
+    manifest = _load_capture_manifest(
+        infinigen.repo_root()
+        / "infinigen_examples"
+        / "configs_indoor"
+        / "capture_manifests"
+        / "debug.yaml"
+    )
+
+    assert manifest["cameras"]["rgb"]["outputs"] == {
+        "image": ["png"],
+        "depth": ["png"],
+    }
+
+
+def test_rgb_only_manifest_can_disable_ir_outputs():
+    manifest = _load_capture_manifest(
+        infinigen.repo_root()
+        / "infinigen_examples"
+        / "configs_indoor"
+        / "capture_manifests"
+        / "rgb_only.yaml"
+    )
+
+    assert manifest["cameras"]["left"]["outputs"] == {}
+    assert manifest["cameras"]["right"]["outputs"] == {}

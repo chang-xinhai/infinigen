@@ -22,7 +22,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CAPTURE_SCRIPT="${CAPTURE_SCRIPT:-${REPO_ROOT}/scripts/launch/capture_existing_seed_scene.sh}"
 
 SKIP_COMPLETED="${SKIP_COMPLETED:-1}"
-DONE_MARKER_REL="${DONE_MARKER_REL:-capture/${SETTING}/output/calibration/calibration.npz}"
+DONE_MARKER_REL="${DONE_MARKER_REL:-capture/${SETTING}/output/calibration/capture_complete.json}"
 SCENE_GLOB="${SCENE_GLOB:-seed_*}"
 TOTAL_CPUS="${TOTAL_CPUS:-${SLURM_CPUS_PER_TASK:-$(nproc)}}"
 MAX_PARALLEL_SCENES="${MAX_PARALLEL_SCENES:-0}"

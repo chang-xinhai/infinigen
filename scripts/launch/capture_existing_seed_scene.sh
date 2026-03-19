@@ -3,7 +3,7 @@
 # structured-light task.
 #
 # Usage:
-#   bash scripts/launch/capture_existing_seed_scene.sh <SCENE_DIR> [SETTING]
+#   bash scripts/launch/capture_existing_seed_scene.sh <SCENE_DIR> [SETTING] [--resume] [--resume-from N]
 #
 # Examples:
 #   bash scripts/launch/capture_existing_seed_scene.sh \
@@ -15,11 +15,52 @@
 
 set -euo pipefail
 
-SCENE_DIR="${1:-}"
-SETTING="${2:-${CAPTURE_SETTING:-full}}"
+usage() {
+    echo "Usage: bash scripts/launch/capture_existing_seed_scene.sh <SCENE_DIR> [SETTING] [--resume] [--resume-from N]"
+}
+
+SCENE_DIR=""
+SETTING=""
+RESUME_CAPTURE=0
+RESUME_FROM_FRAME=""
+POSITIONAL_ARGS=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --resume)
+            RESUME_CAPTURE=1
+            shift
+            ;;
+        --resume-from)
+            if [[ $# -lt 2 ]]; then
+                usage
+                exit 1
+            fi
+            RESUME_CAPTURE=1
+            RESUME_FROM_FRAME="$2"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            POSITIONAL_ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
+
+SCENE_DIR="${POSITIONAL_ARGS[0]:-}"
+SETTING="${POSITIONAL_ARGS[1]:-${CAPTURE_SETTING:-full}}"
 
 if [[ -z "${SCENE_DIR}" ]]; then
-    echo "Usage: bash scripts/launch/capture_existing_seed_scene.sh <SCENE_DIR> [SETTING]"
+    usage
+    exit 1
+fi
+
+if [[ -n "${RESUME_FROM_FRAME}" ]] && ! [[ "${RESUME_FROM_FRAME}" =~ ^[0-9]+$ ]]; then
+    echo "--resume-from must be a non-negative integer, got: ${RESUME_FROM_FRAME}"
     exit 1
 fi
 
@@ -31,11 +72,68 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 DEFAULT_MANIFEST_DIR="${REPO_ROOT}/infinigen_examples/configs_indoor/capture_manifests"
-CAPTURE_MANIFEST="${CAPTURE_MANIFEST:-${DEFAULT_MANIFEST_DIR}/${SETTING}.yaml}"
+DEFAULT_CAPTURE_MANIFEST="${DEFAULT_MANIFEST_DIR}/${SETTING}.yaml"
+
+TRAJECTORY_DIR="${TRAJECTORY_DIR:-${SCENE_DIR}/trajectory}"
+CAPTURE_ROOT="${CAPTURE_ROOT:-${SCENE_DIR}/capture/${SETTING}}"
+CONFIG_DIR="${CONFIG_DIR:-${CAPTURE_ROOT}/config}"
+LOG_DIR="${LOG_DIR:-${CAPTURE_ROOT}/logs}"
+STATS_DIR="${STATS_DIR:-${CAPTURE_ROOT}/stats}"
+OUTPUT_DIR="${OUTPUT_DIR:-${CAPTURE_ROOT}/output}"
+STRUCTURED_LIGHT_DIR="${STRUCTURED_LIGHT_DIR:-${CAPTURE_ROOT}/structured_light}"
+ARCHIVED_CAPTURE_MANIFEST="${CONFIG_DIR}/capture_manifest.yaml"
+ARCHIVED_CAPTURE_SETTINGS="${CONFIG_DIR}/capture_settings.env"
+
+CAPTURE_MANIFEST_SOURCE="setting_default"
+if [[ "${RESUME_CAPTURE}" == "1" && -f "${ARCHIVED_CAPTURE_MANIFEST}" ]]; then
+    CAPTURE_MANIFEST="${ARCHIVED_CAPTURE_MANIFEST}"
+    CAPTURE_MANIFEST_SOURCE="archived_config"
+elif [[ "${RESUME_CAPTURE}" == "1" ]]; then
+    echo "Warning: archived capture manifest missing at ${ARCHIVED_CAPTURE_MANIFEST}; falling back to configured manifest source" >&2
+    if [[ -n "${CAPTURE_MANIFEST:-}" ]]; then
+        CAPTURE_MANIFEST_SOURCE="env_override"
+    else
+        CAPTURE_MANIFEST="${DEFAULT_CAPTURE_MANIFEST}"
+        CAPTURE_MANIFEST_SOURCE="setting_default"
+    fi
+else
+    CAPTURE_MANIFEST="${CAPTURE_MANIFEST:-${DEFAULT_CAPTURE_MANIFEST}}"
+    if [[ -n "${CAPTURE_MANIFEST:-}" && "${CAPTURE_MANIFEST}" != "${DEFAULT_CAPTURE_MANIFEST}" ]]; then
+        CAPTURE_MANIFEST_SOURCE="env_override"
+    fi
+fi
 
 if [[ ! -f "${CAPTURE_MANIFEST}" ]]; then
     echo "Capture manifest not found: ${CAPTURE_MANIFEST}"
     exit 1
+fi
+
+load_archived_capture_settings() {
+    local settings_file="$1"
+    local key
+    local value
+    if [[ ! -f "${settings_file}" ]]; then
+        echo "Warning: archived capture settings missing at ${settings_file}; using current environment defaults" >&2
+        return
+    fi
+
+    while IFS='=' read -r key value; do
+        if [[ -z "${key}" ]]; then
+            continue
+        fi
+        if [[ "${key}" =~ ^# ]]; then
+            continue
+        fi
+        if [[ -n "${!key+x}" ]]; then
+            continue
+        fi
+        printf -v "${key}" '%s' "${value}"
+        export "${key}"
+    done <"${settings_file}"
+}
+
+if [[ "${RESUME_CAPTURE}" == "1" ]]; then
+    load_archived_capture_settings "${ARCHIVED_CAPTURE_SETTINGS}"
 fi
 
 SCENE_SEED="${SCENE_SEED:-}"
@@ -101,14 +199,6 @@ DEPTH_HISTOGRAM_SAMPLE_LIMIT="${DEPTH_HISTOGRAM_SAMPLE_LIMIT:-200000}"
 REUSE_EXISTING_TRAJECTORY="${REUSE_EXISTING_TRAJECTORY:-1}"
 FRAME_RANGE="${FRAME_RANGE:-}"
 
-TRAJECTORY_DIR="${TRAJECTORY_DIR:-${SCENE_DIR}/trajectory}"
-CAPTURE_ROOT="${CAPTURE_ROOT:-${SCENE_DIR}/capture/${SETTING}}"
-CONFIG_DIR="${CONFIG_DIR:-${CAPTURE_ROOT}/config}"
-LOG_DIR="${LOG_DIR:-${CAPTURE_ROOT}/logs}"
-STATS_DIR="${STATS_DIR:-${CAPTURE_ROOT}/stats}"
-OUTPUT_DIR="${OUTPUT_DIR:-${CAPTURE_ROOT}/output}"
-STRUCTURED_LIGHT_DIR="${STRUCTURED_LIGHT_DIR:-${CAPTURE_ROOT}/structured_light}"
-
 mkdir -p "${TRAJECTORY_DIR}" "${CAPTURE_ROOT}" "${CONFIG_DIR}" "${LOG_DIR}" "${STATS_DIR}"
 
 RENDER_LOG="${LOG_DIR}/render.log"
@@ -116,6 +206,7 @@ CAPTURE_SETTINGS_FILE="${CONFIG_DIR}/capture_settings.env"
 CAPTURE_MANIFEST_COPY="${CONFIG_DIR}/capture_manifest.yaml"
 DEPTH_HISTOGRAM_JSON="${STATS_DIR}/depth_histogram.json"
 DEPTH_HISTOGRAM_PNG="${STATS_DIR}/depth_histogram.png"
+CAPTURE_DONE_MARKER="${OUTPUT_DIR}/calibration/capture_complete.json"
 
 TRAJECTORY_CONFIGS=(benchmark.gin real_geometry_with_bump.gin whole_home_walk.gin)
 CAPTURE_CONFIGS=(benchmark.gin real_geometry_with_bump.gin whole_home_walk.gin structured_light.gin)
@@ -154,6 +245,7 @@ CAPTURE_OVERRIDES=(
     "render_structured_light.sl_preview_disable_caustics=${RGB_DISABLE_CAUSTICS}"
     "render_structured_light.sl_preview_sample_clamp_indirect=${RGB_SAMPLE_CLAMP_INDIRECT}"
     "render_structured_light.sl_preview_sample_clamp_direct=${RGB_SAMPLE_CLAMP_DIRECT}"
+    "render_structured_light.sl_resume=${RESUME_CAPTURE}"
 )
 
 if [[ -n "${SL_PATTERN_DIR}" ]]; then
@@ -165,8 +257,13 @@ if [[ -n "${FRAME_RANGE}" ]]; then
     CAPTURE_OVERRIDES=(
         "execute_tasks.use_scene_frame_range=False"
         "execute_tasks.frame_range=[${FRAME_START},${FRAME_END}]"
+        "render_structured_light.sl_frame_index_offset=${FRAME_START}"
         "${CAPTURE_OVERRIDES[@]:1}"
     )
+fi
+
+if [[ -n "${RESUME_FROM_FRAME}" ]]; then
+    CAPTURE_OVERRIDES+=("render_structured_light.sl_resume_from_frame=${RESUME_FROM_FRAME}")
 fi
 
 append_log_header() {
@@ -185,10 +282,15 @@ write_capture_settings() {
         echo "SCENE_SEED=${SCENE_SEED}"
         echo "SETTING=${SETTING}"
         echo "CAPTURE_MANIFEST=${CAPTURE_MANIFEST}"
+        echo "CAPTURE_MANIFEST_SOURCE=${CAPTURE_MANIFEST_SOURCE}"
         echo "TRAJECTORY_DIR=${TRAJECTORY_DIR}"
         echo "CAPTURE_ROOT=${CAPTURE_ROOT}"
         echo "OUTPUT_DIR=${OUTPUT_DIR}"
         echo "STRUCTURED_LIGHT_DIR=${STRUCTURED_LIGHT_DIR}"
+        echo "RESUME_CAPTURE=${RESUME_CAPTURE}"
+        if [[ -n "${RESUME_FROM_FRAME}" ]]; then
+            echo "RESUME_FROM_FRAME=${RESUME_FROM_FRAME}"
+        fi
         echo "CAPTURE_WIDTH=${CAPTURE_WIDTH}"
         echo "CAPTURE_HEIGHT=${CAPTURE_HEIGHT}"
         echo "SL_MAX_SAMPLES=${SL_MAX_SAMPLES}"
@@ -208,7 +310,9 @@ write_capture_settings() {
         fi
     } >"${CAPTURE_SETTINGS_FILE}"
 
-    cp "${CAPTURE_MANIFEST}" "${CAPTURE_MANIFEST_COPY}"
+    if [[ "$(realpath "${CAPTURE_MANIFEST}")" != "$(realpath "${CAPTURE_MANIFEST_COPY}")" ]]; then
+        cp "${CAPTURE_MANIFEST}" "${CAPTURE_MANIFEST_COPY}"
+    fi
 }
 
 print_header() {
@@ -220,8 +324,13 @@ print_header() {
     echo "  Trajectory dir: ${TRAJECTORY_DIR}"
     echo "  Capture root: ${CAPTURE_ROOT}"
     echo "  Manifest: ${CAPTURE_MANIFEST}"
+    echo "  Manifest source: ${CAPTURE_MANIFEST_SOURCE}"
     echo "  Resolution: ${CAPTURE_WIDTH}x${CAPTURE_HEIGHT}"
     echo "  SL max samples: ${SL_MAX_SAMPLES}"
+    echo "  Resume capture: ${RESUME_CAPTURE}"
+    if [[ -n "${RESUME_FROM_FRAME}" ]]; then
+        echo "  Resume from frame: ${RESUME_FROM_FRAME}"
+    fi
     if [[ -n "${FRAME_RANGE}" ]]; then
         echo "  Frame range override: ${FRAME_RANGE}"
     fi
@@ -247,6 +356,7 @@ run_trajectory() {
 
 run_capture() {
     append_log_header "Structured Light Capture"
+    rm -f "${CAPTURE_DONE_MARKER}"
     "${PY_CMD[@]}" -m infinigen_examples.generate_indoors \
         --seed "${SCENE_SEED}" \
         --task structured_light \
@@ -255,6 +365,13 @@ run_capture() {
         -g "${CAPTURE_CONFIGS[@]}" \
         -p "${COMMON_OVERRIDES[@]}" "${CAPTURE_OVERRIDES[@]}" \
         >>"${RENDER_LOG}" 2>&1
+}
+
+write_done_marker() {
+    mkdir -p "$(dirname "${CAPTURE_DONE_MARKER}")"
+    cat >"${CAPTURE_DONE_MARKER}" <<EOF
+{"status":"complete","setting":"${SETTING}","scene_seed":"${SCENE_SEED}"}
+EOF
 }
 
 run_depth_histogram() {
@@ -293,6 +410,9 @@ print_summary() {
     if [[ -f "${OUTPUT_DIR}/calibration/calibration.jsonl" ]]; then
         echo "Calibration jsonl: ${OUTPUT_DIR}/calibration/calibration.jsonl"
     fi
+    if [[ -f "${CAPTURE_DONE_MARKER}" ]]; then
+        echo "Done marker: ${CAPTURE_DONE_MARKER}"
+    fi
     if [[ -f "${DEPTH_HISTOGRAM_JSON}" ]]; then
         echo "Depth histogram json: ${DEPTH_HISTOGRAM_JSON}"
     fi
@@ -307,11 +427,16 @@ prune_empty_dirs() {
     rmdir "${STATS_DIR}" 2>/dev/null || true
 }
 
-: >"${RENDER_LOG}"
+if [[ "${RESUME_CAPTURE}" != "1" ]]; then
+    : >"${RENDER_LOG}"
+else
+    touch "${RENDER_LOG}"
+fi
 write_capture_settings
 print_header
 run_trajectory
 run_capture
 run_depth_histogram
+write_done_marker
 prune_empty_dirs
 print_summary
