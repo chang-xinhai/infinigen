@@ -1,0 +1,30 @@
+setting: test
+patterns:
+  names:
+    - d435
+  white: white.png
+cameras:
+  rgb:
+    outputs:
+      image:
+        - png
+    calibration:
+      intrinsic: true
+      extrinsic: true
+  left:
+    outputs:
+      image:
+        - png
+    calibration:
+      intrinsic: true
+      extrinsic: false
+  right:
+    outputs:
+      image:
+        - png
+    calibration:
+      intrinsic: true
+      extrinsic: false
+calibration:
+  save_npz: true
+  save_jsonl: false

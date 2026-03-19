@@ -227,7 +227,7 @@ bash scripts/launch/capture_existing_seed_scene.sh <SCENE_DIR> [SETTING] [--resu
 where:
 
 - `SCENE_DIR` is the seed root, for example `outputs/benchmark/structured_light_indoors/seed_42`
-- `SETTING` selects the capture manifest and the output directory name, for example `rgb_only`, `debug`, or `full`
+- `SETTING` selects the capture manifest and the output directory name, for example `test`, `rgb_only`, `debug`, or `full`
 
 The script infers `scene_seed` from the `seed_<N>` folder name, reuses or regenerates `trajectory/`, and then runs one manifest-driven structured-light capture task. The manifest is the single source of truth for which patterns, cameras, formats, and calibration payloads are written.
 
@@ -253,8 +253,8 @@ Recommended command:
 
 ```bash
 CONDA_ENV=infinigen_311 \
-WALK_FPS=3 \
-WALK_STEP_M=0.15 \
+WALK_FPS=8 \
+WALK_STEP_M=0.05 \
 CAPTURE_WIDTH=848 \
 CAPTURE_HEIGHT=480 \
 SL_MAX_SAMPLES=128 \
@@ -282,8 +282,8 @@ Recommended command:
 
 ```bash
 CONDA_ENV=infinigen_311 \
-WALK_FPS=3 \
-WALK_STEP_M=0.15 \
+WALK_FPS=8 \
+WALK_STEP_M=0.05 \
 CAPTURE_WIDTH=320 \
 CAPTURE_HEIGHT=240 \
 bash scripts/launch/capture_existing_seed_scene.sh \
@@ -299,13 +299,28 @@ For quick structured-light checks with one pattern and optional JSONL calibratio
 
 ```bash
 CONDA_ENV=infinigen_311 \
-WALK_FPS=3 \
+WALK_FPS=8 \
 CAPTURE_WIDTH=320 \
 CAPTURE_HEIGHT=240 \
 bash scripts/launch/capture_existing_seed_scene.sh \
     outputs/benchmark/structured_light_indoors/seed_42 \
     debug
 ```
+
+### Test
+
+For the lightest built-in capture that still keeps one structured-light pattern:
+
+```bash
+CONDA_ENV=infinigen_311 \
+CAPTURE_WIDTH=848 \
+CAPTURE_HEIGHT=480 \
+bash scripts/launch/capture_existing_seed_scene.sh \
+    outputs/benchmark/structured_light_indoors/seed_42 \
+    test
+```
+
+This setting uses `infinigen_examples/configs_indoor/capture_manifests/test.yaml`, keeps only `rgb/image/*.png`, and writes one `d435` pattern image per IR camera.
 
 The rerun layout is now:
 
@@ -350,8 +365,8 @@ Recommended H100 submission flow with the current `scripts/submit.sh` resource r
 CONDA_ENV=infinigen_311 \
 MAX_PARALLEL_SCENES=8 \
 TOTAL_CPUS=120 \
-WALK_FPS=3 \
-WALK_STEP_M=0.15 \
+WALK_FPS=8 \
+WALK_STEP_M=0.05 \
 CAPTURE_WIDTH=848 \
 CAPTURE_HEIGHT=480 \
 SL_MAX_SAMPLES=128 \
@@ -404,6 +419,7 @@ Important capture controls:
 Behavior is controlled by the selected capture manifest. The built-in defaults live under:
 
 - `infinigen_examples/configs_indoor/capture_manifests/full.yaml`
+- `infinigen_examples/configs_indoor/capture_manifests/test.yaml`
 - `infinigen_examples/configs_indoor/capture_manifests/rgb_only.yaml`
 - `infinigen_examples/configs_indoor/capture_manifests/debug.yaml`
 
