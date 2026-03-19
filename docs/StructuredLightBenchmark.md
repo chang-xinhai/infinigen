@@ -221,7 +221,7 @@ This validated run writes:
 For batch reruns on already-generated benchmark scenes such as `outputs/benchmark/structured_light_indoors/seed_42/coarse/scene.blend`, use:
 
 ```bash
-bash scripts/launch/capture_existing_seed_scene.sh <SCENE_DIR> [SETTING]
+bash scripts/launch/capture_existing_seed_scene.sh <SCENE_DIR> [SETTING] [--resume] [--resume-from N]
 ```
 
 where:
@@ -236,6 +236,16 @@ Important detail:
 - `seed_<N>/capture/<setting>/config/capture_manifest.yaml` is a post-run snapshot copied by the script for bookkeeping
 - the actual pre-run configuration source is the manifest selected before launch, either `infinigen_examples/configs_indoor/capture_manifests/<setting>.yaml` or the file passed through `CAPTURE_MANIFEST=/path/to/custom.yaml`
 - if you want to change outputs such as dropping RGB depth `png`, edit the source manifest before capture instead of editing the copied snapshot after capture
+- in `--resume` mode, the script first tries to reuse `capture/<setting>/config/capture_manifest.yaml` so the rerun matches the interrupted run as closely as possible; if that archived manifest is missing, the script prints a warning and falls back to the configured manifest source
+
+Resume notes:
+
+- `--resume` keeps the existing output tree and skips frames whose required outputs already exist
+- if a frame’s images are present but its calibration record is missing, resume will append the missing calibration entry without rerendering the frame
+- `--resume-from N` forces resume to start considering frames from capture index `N`
+- incremental calibration progress is written to `capture/<setting>/output/calibration/calibration.jsonl`
+- aggregate calibration in `calibration.npz` is rebuilt at the end of a successful run
+- the explicit completion marker for a fully consistent capture is `capture/<setting>/output/calibration/capture_complete.json`
 
 ### Full
 
@@ -262,7 +272,9 @@ This setting:
 - writes the scene-level depth histogram summary to `capture/full/stats/depth_histogram.{json,png}`
 - writes selected pattern png files to `capture/full/structured_light/patterns/`
 - writes actual render outputs to `capture/full/output/`
+- writes incremental calibration progress to `capture/full/output/calibration/calibration.jsonl`
 - writes aggregate calibration to `capture/full/output/calibration/calibration.npz`
+- writes an explicit completion marker to `capture/full/output/calibration/capture_complete.json`
 
 ### RGB-only
 
@@ -328,7 +340,7 @@ The script:
 
 - scans `seed_*` directories under `OUTPUT_ROOT`
 - keeps only scenes with `coarse/scene.blend`
-- skips already-completed scenes by default when `capture/<setting>/output/calibration/calibration.npz` exists
+- skips already-completed scenes by default when `capture/<setting>/output/calibration/capture_complete.json` exists
 - dynamically assigns the remaining scenes across available GPUs so faster workers keep pulling new scenes
 - writes a batch summary to `OUTPUT_ROOT/logs/existing_seed_capture/summary_<setting>_<timestamp>.tsv`
 
@@ -356,7 +368,7 @@ Useful overrides:
 - `SKIP_COMPLETED=0` forces rerender even when the done marker already exists
 - `GPU_IDS=0,1,2,3,4,5,6,7` pins the worker pool to an explicit GPU list
 - `MAX_PARALLEL_SCENES=<N>` reduces concurrency below the number of visible GPUs
-- `DONE_MARKER_REL=...` changes the completion check if you want a stricter or looser resume policy
+- `DONE_MARKER_REL=...` changes the completion check if you want a stricter or looser resume policy; the default is now `capture/<setting>/output/calibration/capture_complete.json`
 - `SUBMIT_USE_SRUN=1` restores the old nested-`srun` launch behavior if your cluster needs it
 - all single-scene knobs such as `WALK_*`, `CAPTURE_*`, `SL_MAX_SAMPLES`, and `CAPTURE_MANIFEST` are forwarded to `capture_existing_seed_scene.sh`
 
