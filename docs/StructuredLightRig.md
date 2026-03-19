@@ -83,8 +83,15 @@ If you intentionally want the older projector-only behavior for debugging, set
 
 The default projector settings in
 `infinigen_examples/configs_indoor/structured_light.gin` now track the
-`.idea/deepsl-data` rig more closely:
+current bright structured-light indoor capture defaults:
 
 - `sl_proj_fov_delta_deg = -5.0`
 - `sl_proj_dlp_size = 8.4`
-- `sl_proj_energy = 200.0`
+- `sl_proj_energy = 1000.0`
+- `configure_render_cycles.exposure = 10`
+
+This indoor structured-light config intentionally renders much brighter than
+the base indoor defaults so RGB frames do not remain underexposed in dark
+houses. Because that stronger ambient baseline can wash out projected patterns,
+the default projector energy is also raised substantially to preserve IR
+pattern contrast.
