@@ -140,6 +140,10 @@ def _rewrite_incremental_calibration(progress_path, header, frame_records):
     _write_jsonl_atomic(progress_path, records)
 
 
+def _create_render_temp_dir():
+    return Path(tempfile.mkdtemp(prefix="sl_render_"))
+
+
 def _append_incremental_calibration_frame(progress_path, frame_id, extrinsic):
     progress_path = Path(progress_path)
     progress_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1151,7 +1155,7 @@ def _render_single(
         tree.links.remove(link)
     tree.links.new(render_layers.outputs["Image"], composite.inputs["Image"])
 
-    temp_dir = Path(tempfile.mkdtemp(prefix="sl_render_", dir=str(Path.cwd())))
+    temp_dir = _create_render_temp_dir()
     try:
         exr_out = None
         png_out = None

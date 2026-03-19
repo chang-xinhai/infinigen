@@ -2,6 +2,7 @@
 
 import bpy
 import numpy as np
+from pathlib import Path
 
 import infinigen
 from infinigen.core.rendering.structured_light import (
@@ -10,6 +11,7 @@ from infinigen.core.rendering.structured_light import (
     _calibration_header_from_payload,
     _configure_rgb_capture_lighting,
     _configure_pattern_capture_lighting,
+    _create_render_temp_dir,
     _frame_outputs_complete,
     _load_capture_manifest,
     _load_incremental_calibration,
@@ -216,6 +218,21 @@ def test_shared_baseline_env_strength_uses_preview_floor_when_forced():
         preview_force_lighting=False,
         preview_world_strength=0.5,
     ) == 0.1
+
+
+def test_render_temp_dir_uses_system_temp_location(monkeypatch):
+    calls = []
+
+    def fake_mkdtemp(*, prefix, dir=None):
+        calls.append({"prefix": prefix, "dir": dir})
+        return "/tmp/sl_render_fake"
+
+    monkeypatch.setattr("infinigen.core.rendering.structured_light.tempfile.mkdtemp", fake_mkdtemp)
+
+    temp_dir = _create_render_temp_dir()
+
+    assert temp_dir == Path("/tmp/sl_render_fake")
+    assert calls == [{"prefix": "sl_render_", "dir": None}]
 
 
 def test_structured_light_incremental_calibration_loader_tolerates_truncated_tail(tmp_path):
