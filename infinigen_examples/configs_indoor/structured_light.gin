@@ -17,9 +17,9 @@ render_structured_light.sl_cam_fov_deg = 69.4         # horizontal FOV of IR cam
 render_structured_light.sl_cam_sensor_width = 6.328   # mm
 render_structured_light.sl_cam_sensor_height = 4.746  # mm
 render_structured_light.sl_rgb_offset_scale = -0.55   # RGB x = baseline * scale; puts RGB slightly left of L
-render_structured_light.sl_proj_fov_delta_deg = 5.0   # projector FOV = cam FOV + delta
-render_structured_light.sl_proj_dlp_size = 6.328      # mm, projector DLP chip diagonal
-render_structured_light.sl_proj_energy = 30.0         # Blender spotlight energy (watts)
+render_structured_light.sl_proj_fov_delta_deg = -5.0  # align with deepsl-data: narrower projector cone for denser pattern contrast
+render_structured_light.sl_proj_dlp_size = 8.4        # mm, align with deepsl-data 0.33" DLP projector
+render_structured_light.sl_proj_energy = 200.0        # align with deepsl-data projector intensity
 
 # ── Resolution ────────────────────────────────────────────────
 render_structured_light.sl_resolution_x = 1280
@@ -39,10 +39,11 @@ render_structured_light.sl_capture_manifest_path = None
 render_structured_light.sl_max_samples = 64
 render_structured_light.sl_exr_depth = 16
 render_structured_light.sl_preview_force_lighting = True
-render_structured_light.sl_preview_world_strength = 0.25
-render_structured_light.sl_preview_sun_energy = 1.0
-render_structured_light.sl_preview_camera_light_energy = 120.0
+render_structured_light.sl_preview_world_strength = 0.5   # floor for shared RGB/IR background lighting in dim scenes
+render_structured_light.sl_preview_sun_energy = 1.25      # modest global fill; shared by RGB and IR backgrounds
+render_structured_light.sl_preview_camera_light_energy = 0.0  # disable camera-centered hotspot by default
 render_structured_light.sl_preview_force_denoising = True
 render_structured_light.sl_preview_disable_caustics = True
 render_structured_light.sl_preview_sample_clamp_indirect = 0.75
 render_structured_light.sl_preview_sample_clamp_direct = 2.5
+render_structured_light.sl_pattern_keep_scene_lighting = True  # RGB and IR share the same background lighting; IR only adds the projector

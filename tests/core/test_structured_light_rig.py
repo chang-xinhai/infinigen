@@ -8,11 +8,15 @@ from infinigen.core.rendering.structured_light import (
     StructuredLightRig,
     _append_incremental_calibration_frame,
     _calibration_header_from_payload,
+    _configure_rgb_capture_lighting,
+    _configure_pattern_capture_lighting,
     _frame_outputs_complete,
     _load_capture_manifest,
     _load_incremental_calibration,
+    _resolve_shared_baseline_env_strength,
     _resolve_manifest_pattern_config,
     _rewrite_incremental_calibration,
+    _restore_pattern_capture_lighting,
     _resolve_pattern_paths,
 )
 
@@ -119,6 +123,101 @@ def test_structured_light_frame_outputs_complete_uses_manifest_and_patterns(tmp_
     assert _frame_outputs_complete(output_root, manifest, pattern_specs, frame_tag)
 
 
+class _RigLightingStub:
+    def __init__(self):
+        self.calls = []
+
+    def set_projector_visible(self, on=True):
+        self.calls.append(("projector", on))
+
+    def set_scene_lights(self, on=True):
+        self.calls.append(("scene_lights", on))
+
+    def set_env_strength(self, strength):
+        self.calls.append(("env_strength", strength))
+
+
+def test_pattern_capture_lighting_preserves_scene_state_by_default():
+    rig = _RigLightingStub()
+
+    _configure_pattern_capture_lighting(
+        rig,
+        keep_scene_lighting=True,
+        baseline_env_strength=0.25,
+    )
+    _restore_pattern_capture_lighting(
+        rig,
+        keep_scene_lighting=True,
+        baseline_env_strength=0.25,
+    )
+
+    assert rig.calls == [
+        ("scene_lights", True),
+        ("env_strength", 0.25),
+        ("projector", True),
+        ("projector", False),
+        ("scene_lights", True),
+        ("env_strength", 0.25),
+    ]
+
+
+def test_pattern_capture_lighting_can_disable_scene_lights_for_legacy_mode():
+    rig = _RigLightingStub()
+
+    _configure_pattern_capture_lighting(
+        rig,
+        keep_scene_lighting=False,
+        baseline_env_strength=0.25,
+    )
+    _restore_pattern_capture_lighting(
+        rig,
+        keep_scene_lighting=False,
+        baseline_env_strength=0.25,
+    )
+
+    assert rig.calls == [
+        ("scene_lights", False),
+        ("env_strength", 0),
+        ("projector", True),
+        ("projector", False),
+        ("scene_lights", True),
+        ("env_strength", 0.25),
+    ]
+
+
+def test_rgb_capture_lighting_uses_shared_baseline_without_projector():
+    rig = _RigLightingStub()
+
+    _configure_rgb_capture_lighting(
+        rig,
+        baseline_env_strength=0.5,
+    )
+
+    assert rig.calls == [
+        ("projector", False),
+        ("scene_lights", True),
+        ("env_strength", 0.5),
+    ]
+
+
+def test_shared_baseline_env_strength_uses_preview_floor_when_forced():
+    assert _resolve_shared_baseline_env_strength(
+        orig_env_strength=0.1,
+        preview_force_lighting=True,
+        preview_world_strength=0.5,
+    ) == 0.5
+    assert _resolve_shared_baseline_env_strength(
+        orig_env_strength=0.8,
+        preview_force_lighting=True,
+        preview_world_strength=0.5,
+    ) == 0.8
+    assert _resolve_shared_baseline_env_strength(
+        orig_env_strength=0.1,
+        preview_force_lighting=False,
+        preview_world_strength=0.5,
+    ) == 0.1
+
+
 def test_structured_light_incremental_calibration_loader_tolerates_truncated_tail(tmp_path):
     progress_path = tmp_path / "calibration.jsonl"
     payload = {
@@ -207,3 +306,18 @@ def test_rgb_only_manifest_can_disable_ir_outputs():
 
     assert manifest["cameras"]["left"]["outputs"] == {}
     assert manifest["cameras"]["right"]["outputs"] == {}
+
+
+def test_test_manifest_keeps_only_rgb_and_single_d435_pattern():
+    manifest = _load_capture_manifest(
+        infinigen.repo_root()
+        / "infinigen_examples"
+        / "configs_indoor"
+        / "capture_manifests"
+        / "test.yaml"
+    )
+
+    assert manifest["patterns"]["names"] == ["d435"]
+    assert manifest["cameras"]["rgb"]["outputs"] == {"image": ["png"]}
+    assert manifest["cameras"]["left"]["outputs"] == {"image": ["png"]}
+    assert manifest["cameras"]["right"]["outputs"] == {"image": ["png"]}

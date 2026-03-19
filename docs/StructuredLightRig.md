@@ -60,3 +60,31 @@ and the capture manifest selected by the launch script.
 With the default config, pattern assets are loaded from the built-in repository
 directory `data/patterns/`. Use `render_structured_light.sl_pattern_dir` only
 when you intentionally want to override those shipped assets.
+
+## Pattern capture lighting
+
+RGB baseline captures now render with the structured-light projector disabled.
+IR pattern captures preserve that same scene-lighting baseline and only enable
+the structured-light projector on top. In other words, RGB and IR should share
+the same background brightness, while only the projected region becomes brighter
+in IR.
+
+To keep dim indoor scenes from collapsing into underexposed captures, the
+structured-light config now treats
+`render_structured_light.sl_preview_world_strength` as a floor for the shared
+RGB/IR world background strength. The default config also disables the
+camera-attached preview point light to avoid a center-bright hotspot.
+
+If you intentionally want the older projector-only behavior for debugging, set
+`render_structured_light.sl_pattern_keep_scene_lighting = False` in
+`infinigen_examples/configs_indoor/structured_light.gin`.
+
+## Default projector tuning
+
+The default projector settings in
+`infinigen_examples/configs_indoor/structured_light.gin` now track the
+`.idea/deepsl-data` rig more closely:
+
+- `sl_proj_fov_delta_deg = -5.0`
+- `sl_proj_dlp_size = 8.4`
+- `sl_proj_energy = 200.0`

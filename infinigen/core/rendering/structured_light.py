@@ -10,8 +10,9 @@
 #     structured_light/
 #       patterns/
 #
-# RGB is rendered inside the structured-light task using a white projector
-# baseline state to avoid a second full scene render pass.
+# RGB is rendered inside the structured-light task without the projector to
+# avoid a second full scene render pass. IR pattern captures preserve the same
+# scene-lighting baseline and only add the projector on top.
 
 import copy
 import json
@@ -767,6 +768,40 @@ def _restore_cycles_state(scene, state):
     cycles.sample_clamp_direct = state["sample_clamp_direct"]
 
 
+def _resolve_shared_baseline_env_strength(
+    *, orig_env_strength: float, preview_force_lighting: bool, preview_world_strength: float
+):
+    if not preview_force_lighting or preview_world_strength is None:
+        return orig_env_strength
+    return max(float(orig_env_strength), float(preview_world_strength))
+
+
+def _configure_rgb_capture_lighting(rig, *, baseline_env_strength: float):
+    rig.set_projector_visible(False)
+    rig.set_scene_lights(True)
+    rig.set_env_strength(baseline_env_strength)
+
+
+def _configure_pattern_capture_lighting(
+    rig, *, keep_scene_lighting: bool, baseline_env_strength: float
+):
+    if keep_scene_lighting:
+        rig.set_scene_lights(True)
+        rig.set_env_strength(baseline_env_strength)
+    else:
+        rig.set_scene_lights(False)
+        rig.set_env_strength(0)
+    rig.set_projector_visible(True)
+
+
+def _restore_pattern_capture_lighting(
+    rig, *, keep_scene_lighting: bool, baseline_env_strength: float
+):
+    rig.set_projector_visible(False)
+    rig.set_scene_lights(True)
+    rig.set_env_strength(baseline_env_strength)
+
+
 def _resolve_target_path(template_path, frame_tag):
     if template_path is None:
         return None
@@ -799,9 +834,9 @@ def render_structured_light(
     sl_cam_sensor_width=6.328,
     sl_cam_sensor_height=4.746,
     sl_rgb_offset_scale=-0.55,
-    sl_proj_fov_delta_deg=5.0,
-    sl_proj_dlp_size=6.328,
-    sl_proj_energy=30.0,
+    sl_proj_fov_delta_deg=-5.0,
+    sl_proj_dlp_size=8.4,
+    sl_proj_energy=200.0,
     sl_resolution_x=1280,
     sl_resolution_y=720,
     sl_pattern_resolution_x=1280,
@@ -813,15 +848,16 @@ def render_structured_light(
     sl_max_samples=64,
     sl_exr_depth=16,
     sl_preview_force_lighting=True,
-    sl_preview_world_strength=0.25,
-    sl_preview_sun_energy=1.0,
+    sl_preview_world_strength=0.5,
+    sl_preview_sun_energy=1.25,
     sl_preview_sun_rotation_deg=(55.0, 0.0, 35.0),
-    sl_preview_camera_light_energy=120.0,
+    sl_preview_camera_light_energy=0.0,
     sl_preview_camera_light_offset_m=(0.0, 0.0, 0.15),
     sl_preview_force_denoising=True,
     sl_preview_disable_caustics=True,
     sl_preview_sample_clamp_indirect=0.75,
     sl_preview_sample_clamp_direct=2.5,
+    sl_pattern_keep_scene_lighting=True,
     sl_resume=False,
     sl_resume_from_frame=None,
     sl_frame_index_offset=0,
@@ -878,6 +914,11 @@ def render_structured_light(
 
     orig_env_strength = rig.set_env_strength(0)
     rig.set_env_strength(orig_env_strength)
+    shared_baseline_env_strength = _resolve_shared_baseline_env_strength(
+        orig_env_strength=orig_env_strength,
+        preview_force_lighting=bool(sl_preview_force_lighting),
+        preview_world_strength=sl_preview_world_strength,
+    )
     base_cycles_state = _capture_cycles_state(scene)
     _ensure_preview_lighting(
         rig.rgb_cam,
@@ -888,6 +929,7 @@ def render_structured_light(
         preview_camera_light_energy=sl_preview_camera_light_energy,
         preview_camera_light_offset_m=tuple(sl_preview_camera_light_offset_m),
     )
+    rig.set_env_strength(shared_baseline_env_strength)
 
     frame_start = scene.frame_start
     frame_end = scene.frame_end
@@ -991,13 +1033,10 @@ def render_structured_light(
                 preview_sample_clamp_indirect=sl_preview_sample_clamp_indirect,
                 preview_sample_clamp_direct=sl_preview_sample_clamp_direct,
             )
-            if white_pattern_path is not None:
-                rig.set_pattern(str(white_pattern_path))
-                rig.set_projector_visible(True)
-            else:
-                rig.set_projector_visible(False)
-            rig.set_scene_lights(True)
-            rig.set_env_strength(orig_env_strength)
+            _configure_rgb_capture_lighting(
+                rig,
+                baseline_env_strength=shared_baseline_env_strength,
+            )
             _render_single(
                 scene=scene,
                 camera_obj=rig.rgb_cam,
@@ -1008,9 +1047,11 @@ def render_structured_light(
 
         if want_pattern_images and pattern_specs:
             _restore_cycles_state(scene, base_cycles_state)
-            rig.set_projector_visible(True)
-            rig.set_scene_lights(False)
-            rig.set_env_strength(0)
+            _configure_pattern_capture_lighting(
+                rig,
+                keep_scene_lighting=bool(sl_pattern_keep_scene_lighting),
+                baseline_env_strength=shared_baseline_env_strength,
+            )
             for pattern_spec in pattern_specs:
                 pattern_name = pattern_spec["name"]
                 rig.set_pattern(str(pattern_spec["path"]))
@@ -1032,9 +1073,15 @@ def render_structured_light(
                             path_plan=plan,
                             exr_depth=sl_exr_depth,
                         )
+            _restore_pattern_capture_lighting(
+                rig,
+                keep_scene_lighting=bool(sl_pattern_keep_scene_lighting),
+                baseline_env_strength=shared_baseline_env_strength,
+            )
 
+        rig.set_projector_visible(False)
         rig.set_scene_lights(True)
-        rig.set_env_strength(orig_env_strength)
+        rig.set_env_strength(shared_baseline_env_strength)
         frame_records[capture_frame_idx] = frame_extrinsic
         _append_incremental_calibration_frame(
             calibration_progress_path,
