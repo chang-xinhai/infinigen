@@ -772,6 +772,24 @@ def _restore_cycles_state(scene, state):
     cycles.sample_clamp_direct = state["sample_clamp_direct"]
 
 
+def _configure_shared_capture_cycles(
+    scene,
+    *,
+    base_cycles_state,
+    preview_force_denoising: bool,
+    preview_disable_caustics: bool,
+    preview_sample_clamp_indirect: float | None,
+    preview_sample_clamp_direct: float | None,
+):
+    _restore_cycles_state(scene, base_cycles_state)
+    _configure_preview_cycles(
+        preview_force_denoising=preview_force_denoising,
+        preview_disable_caustics=preview_disable_caustics,
+        preview_sample_clamp_indirect=preview_sample_clamp_indirect,
+        preview_sample_clamp_direct=preview_sample_clamp_direct,
+    )
+
+
 def _resolve_shared_baseline_env_strength(
     *, orig_env_strength: float, preview_force_lighting: bool, preview_world_strength: float
 ):
@@ -1031,7 +1049,9 @@ def render_structured_light(
             continue
 
         if want_rgb:
-            _configure_preview_cycles(
+            _configure_shared_capture_cycles(
+                scene,
+                base_cycles_state=base_cycles_state,
                 preview_force_denoising=sl_preview_force_denoising,
                 preview_disable_caustics=sl_preview_disable_caustics,
                 preview_sample_clamp_indirect=sl_preview_sample_clamp_indirect,
@@ -1050,7 +1070,14 @@ def render_structured_light(
             )
 
         if want_pattern_images and pattern_specs:
-            _restore_cycles_state(scene, base_cycles_state)
+            _configure_shared_capture_cycles(
+                scene,
+                base_cycles_state=base_cycles_state,
+                preview_force_denoising=sl_preview_force_denoising,
+                preview_disable_caustics=sl_preview_disable_caustics,
+                preview_sample_clamp_indirect=sl_preview_sample_clamp_indirect,
+                preview_sample_clamp_direct=sl_preview_sample_clamp_direct,
+            )
             _configure_pattern_capture_lighting(
                 rig,
                 keep_scene_lighting=bool(sl_pattern_keep_scene_lighting),

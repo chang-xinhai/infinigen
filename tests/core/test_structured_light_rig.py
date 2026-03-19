@@ -2,13 +2,16 @@
 
 import bpy
 import numpy as np
+from types import SimpleNamespace
 from pathlib import Path
 
 import infinigen
+import infinigen.core.rendering.structured_light as structured_light
 from infinigen.core.rendering.structured_light import (
     StructuredLightRig,
     _append_incremental_calibration_frame,
     _calibration_header_from_payload,
+    _configure_shared_capture_cycles,
     _configure_rgb_capture_lighting,
     _configure_pattern_capture_lighting,
     _create_render_temp_dir,
@@ -218,6 +221,79 @@ def test_shared_baseline_env_strength_uses_preview_floor_when_forced():
         preview_force_lighting=False,
         preview_world_strength=0.5,
     ) == 0.1
+
+
+def test_shared_capture_cycles_resets_to_base_then_applies_preview_overrides(monkeypatch):
+    scene = SimpleNamespace(
+        cycles=SimpleNamespace(
+            use_denoising=False,
+            caustics_reflective=True,
+            caustics_refractive=True,
+            sample_clamp_indirect=0.0,
+            sample_clamp_direct=0.0,
+        )
+    )
+    base_cycles_state = {
+        "use_denoising": False,
+        "caustics_reflective": True,
+        "caustics_refractive": True,
+        "sample_clamp_indirect": 0.0,
+        "sample_clamp_direct": 0.0,
+    }
+
+    scene.cycles.use_denoising = True
+    scene.cycles.caustics_reflective = False
+    scene.cycles.caustics_refractive = False
+    scene.cycles.sample_clamp_indirect = 9.0
+    scene.cycles.sample_clamp_direct = 9.0
+
+    preview_calls = []
+
+    def fake_configure_preview_cycles(**kwargs):
+        preview_calls.append(
+            {
+                "kwargs": kwargs,
+                "state_before_preview": {
+                    "use_denoising": scene.cycles.use_denoising,
+                    "caustics_reflective": scene.cycles.caustics_reflective,
+                    "caustics_refractive": scene.cycles.caustics_refractive,
+                    "sample_clamp_indirect": scene.cycles.sample_clamp_indirect,
+                    "sample_clamp_direct": scene.cycles.sample_clamp_direct,
+                },
+            }
+        )
+
+    monkeypatch.setattr(
+        structured_light,
+        "_configure_preview_cycles",
+        fake_configure_preview_cycles,
+    )
+
+    _configure_shared_capture_cycles(
+        scene,
+        base_cycles_state=base_cycles_state,
+        preview_force_denoising=True,
+        preview_disable_caustics=True,
+        preview_sample_clamp_indirect=0.75,
+        preview_sample_clamp_direct=2.5,
+    )
+
+    assert scene.cycles.use_denoising is False
+    assert scene.cycles.caustics_reflective is True
+    assert scene.cycles.caustics_refractive is True
+    assert scene.cycles.sample_clamp_indirect == 0.0
+    assert scene.cycles.sample_clamp_direct == 0.0
+    assert preview_calls == [
+        {
+            "kwargs": {
+                "preview_force_denoising": True,
+                "preview_disable_caustics": True,
+                "preview_sample_clamp_indirect": 0.75,
+                "preview_sample_clamp_direct": 2.5,
+            },
+            "state_before_preview": base_cycles_state,
+        }
+    ]
 
 
 def test_render_temp_dir_uses_system_temp_location(monkeypatch):

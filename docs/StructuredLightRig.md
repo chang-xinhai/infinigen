@@ -67,7 +67,9 @@ RGB baseline captures now render with the structured-light projector disabled.
 IR pattern captures preserve that same scene-lighting baseline and only enable
 the structured-light projector on top. In other words, RGB and IR should share
 the same background brightness, while only the projected region becomes brighter
-in IR.
+in IR. The render path now also applies the same preview denoising and sample
+clamp settings to both RGB and IR captures so the background appearance stays
+consistent apart from the projector contribution.
 
 To keep dim indoor scenes from collapsing into underexposed captures, the
 structured-light config now treats
