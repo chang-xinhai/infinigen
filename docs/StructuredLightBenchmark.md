@@ -342,6 +342,16 @@ This preset combines:
 
 Use `FRAME_RANGE=start,end` to render only a short clip while checking motion quality, and wrap the command with shell `timeout 1h` to cap exploratory runs.
 
+For an interactive Blender preview that regenerates only `trajectory/scene.blend` and then plays the animated camera path in the viewport, use:
+
+```bash
+bash scripts/launch/preview_existing_seed_trajectory.sh \
+    outputs/benchmark/structured_light_indoors/seed_42 \
+    test_traj
+```
+
+See `docs/TrajectoryPreview.md` for viewport shading options and caveats versus final rendered RGB.
+
 The rerun layout is now:
 
 ```text
