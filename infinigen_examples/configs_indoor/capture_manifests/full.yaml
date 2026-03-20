@@ -1,9 +1,9 @@
 setting: full
 patterns:
   names:
-    - d415
+    # - d415
     - d435
-    - kinectsp
+    # - kinectsp
   white: white.png
 cameras:
   rgb:

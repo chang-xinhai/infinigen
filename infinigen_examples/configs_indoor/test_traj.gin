@@ -17,9 +17,9 @@ animate_whole_home_walk.room_orbit_radius_max_m = 1.10
 animate_whole_home_walk.height_perturbation_amplitude_m = 0.035
 animate_whole_home_walk.height_perturbation_frequency_hz = 0.70
 animate_whole_home_walk.handheld_lateral_amplitude_m = 0.03
-animate_whole_home_walk.handheld_yaw_amplitude_deg = 0.5
-animate_whole_home_walk.handheld_pitch_amplitude_deg = 0.6
-animate_whole_home_walk.handheld_noise_sigma_s = 0.5
+animate_whole_home_walk.handheld_yaw_amplitude_deg = 3.0
+animate_whole_home_walk.handheld_pitch_amplitude_deg =4.0
+animate_whole_home_walk.handheld_noise_sigma_s = 0.4
 animate_whole_home_walk.handheld_forward_smoothing_window = 8
 
 render_structured_light.sl_resolution_x = 320
