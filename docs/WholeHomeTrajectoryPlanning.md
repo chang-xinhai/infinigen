@@ -9,7 +9,8 @@ Implementation status in this repository:
 - the benchmark launch script can reuse existing `coarse` scenes and render from the animated `trajectory` scene
 - the current runtime implementation uses a `collision_aware_grid` room planner with explicit scene ray-cast checks instead of bbox-only doorway segments
 - doorway centers now come from door cutter world-space bounds, not local-space bounds or broken object origins
-- room orbit is disabled by default in benchmark configs; the default room coverage motif is now door-to-room traversal plus in-place sweep
+- room orbit now supports continuous entry onto the orbit ring instead of a one-frame snap from the room center
+- smooth seeded handheld perturbation now supports height bob plus Gaussian-smoothed lateral and view-angle drift
 - room-internal travel now defaults to a collision-aware grid search with explicit `room_grid_step_m`; `orthogonal` remains available as a fallback mode
 - the validated `collision_aware_grid` planner now uses 8-connected room search plus visibility-based shortcut smoothing, so room traversal is less Manhattan-like while still honoring scene ray-cast clearance
 - access doors can be post-processed open during `trajectory` generation; the current validated mode hides doorway leaf geometry in the saved trajectory scene
@@ -229,6 +230,14 @@ where `d_wall_min` is the minimum horizontal distance from the room center to wa
 
 This is an inference from the reconstruction references above: the room needs both appearance coverage and usable baseline.
 
+For the current handheld-style preview preset in this repository, the validated target is tighter:
+
+- default orbit radius near `0.5 m`
+- continuous entry onto the ring over several frames instead of teleporting from the room center
+- smooth lateral drift around `0.02 to 0.05 m`
+- smooth yaw drift around `1 to 3 deg`
+- seeded temporal Gaussian smoothing so frame-to-frame motion remains continuous
+
 ### Layer 3: Free-Space Path Realization
 
 Once high-level waypoints are selected, realize them as a collision-safe walkable path in Blender space.
@@ -432,21 +441,21 @@ If we need one actionable initial setting, I recommend:
 - room traversal: weighted DFS over doorway graph, ending back at start room
 - per room:
   - move to room center
-  - perform `300 deg` sweep
-  - if `d_wall_min >= 1.2 m`, replace in-place sweep with `0.4 to 0.7 m` radius orbit
-- path resampling distance: `0.04 to 0.06 m`
-- render FPS: `6 to 10`
+  - perform an orbit-focused room sweep instead of a pure in-place turn whenever a `~0.5 m` ring fits
+  - enter the orbit with a short eased transition so the first orbit frame does not jump
+- path resampling distance: match `speed / fps`; for handheld preview this is `0.01 m`
+- render FPS: `16 to 24`
 - total path duration target: `60 to 180 s` depending on house size
 
 For benchmark scenes, I would start with:
 
-- `8 FPS`
-- `0.05 m` resampling step
-- no handheld shake
-- almost zero roll
+- `16 FPS`
+- `0.20 m/s` traversal speed
+- `0.0125 m` resampling step
+- `0.45 to 0.55 m` room orbit radius
+- `0.02 m` smooth lateral drift
+- `1.6 deg` smooth yaw drift
 - deterministic seed-controlled traversal
-
-## Why 8 FPS Is A Good Starting Point
 
 This is not from a single paper, but it is consistent with the evidence:
 
@@ -454,11 +463,11 @@ This is not from a single paper, but it is consistent with the evidence:
 - MegaSynth explicitly reduces video FPS to reduce excessive consecutive overlap
 - structured-light data benefits from informative motion, not raw frame count
 
-So `8 FPS` is a reasonable benchmark default for whole-home walking:
+So for the current handheld-style preview path, `16 FPS` is a better starting point:
 
-- enough temporal continuity
-- less redundancy than 24 FPS
-- easier storage and rendering budget
+- enough temporal continuity to suppress visible pose snapping
+- still cheaper than matching a full `30 FPS` sensor stream
+- practical when combined with low-resolution preview renders and short `FRAME_RANGE` clips
 
 ## Proposed Metadata Additions
 

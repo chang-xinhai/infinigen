@@ -1,0 +1,22 @@
+include 'infinigen_examples/configs_indoor/capture_existing_seed_defaults.gin'
+
+animate_whole_home_walk.planner_fps = 20
+animate_whole_home_walk.traversal_speed_mps = 0.30
+animate_whole_home_walk.orbit_speed_mps = 0.24
+animate_whole_home_walk.traversal_point_step_m = 0.015
+
+animate_whole_home_walk.room_sweep_angle_deg = 60.0
+animate_whole_home_walk.room_sweep_yaw_speed_deg_s = 30.0
+animate_whole_home_walk.enable_room_orbit = False
+
+animate_whole_home_walk.height_perturbation_amplitude_m = 0.035
+animate_whole_home_walk.height_perturbation_frequency_hz = 0.70
+animate_whole_home_walk.handheld_lateral_amplitude_m = 0.015
+animate_whole_home_walk.handheld_yaw_amplitude_deg = 1.2
+animate_whole_home_walk.handheld_pitch_amplitude_deg = 0.6
+animate_whole_home_walk.handheld_noise_sigma_s = 0.55
+animate_whole_home_walk.handheld_forward_smoothing_window = 8
+
+render_structured_light.sl_resolution_x = 320
+render_structured_light.sl_resolution_y = 240
+render_structured_light.sl_max_samples = 6

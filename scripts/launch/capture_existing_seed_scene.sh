@@ -73,6 +73,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 DEFAULT_MANIFEST_DIR="${REPO_ROOT}/infinigen_examples/configs_indoor/capture_manifests"
 DEFAULT_CAPTURE_MANIFEST="${DEFAULT_MANIFEST_DIR}/${SETTING}.yaml"
+SETTING_GIN_CONFIG="${REPO_ROOT}/infinigen_examples/configs_indoor/${SETTING}.gin"
 
 TRAJECTORY_DIR="${TRAJECTORY_DIR:-${SCENE_DIR}/trajectory}"
 CAPTURE_ROOT="${CAPTURE_ROOT:-${SCENE_DIR}/capture/${SETTING}}"
@@ -159,44 +160,19 @@ POST_PYTHON_BIN="${POST_PYTHON_BIN:-python}"
 export MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp/mpl}"
 mkdir -p "${MPLCONFIGDIR}"
 
-WALK_CAMERA_HEIGHT_M="${WALK_CAMERA_HEIGHT_M:-1.55}"
-WALK_FPS="${WALK_FPS:-8}"
-WALK_TRAVERSAL_SPEED_MPS="${WALK_TRAVERSAL_SPEED_MPS:-0.30}"
-WALK_ORBIT_SPEED_MPS="${WALK_ORBIT_SPEED_MPS:-0.18}"
-WALK_STEP_M="${WALK_STEP_M:-0.05}"
-WALK_CLEARANCE_M="${WALK_CLEARANCE_M:-0.20}"
-WALK_PATH_MARGIN_M="${WALK_PATH_MARGIN_M:-0.18}"
-WALK_PATH_RESOLUTION="${WALK_PATH_RESOLUTION:-160000}"
-WALK_ROOM_SWEEP_ANGLE_DEG="${WALK_ROOM_SWEEP_ANGLE_DEG:-180.0}"
-WALK_ROOM_SWEEP_YAW_SPEED_DEG_S="${WALK_ROOM_SWEEP_YAW_SPEED_DEG_S:-24.0}"
-WALK_ENABLE_ROOM_ORBIT="${WALK_ENABLE_ROOM_ORBIT:-False}"
-WALK_ROOM_GRID_STEP_M="${WALK_ROOM_GRID_STEP_M:-0.10}"
-WALK_HEIGHT_PERTURBATION_AMPLITUDE_M="${WALK_HEIGHT_PERTURBATION_AMPLITUDE_M:-0.04}"
-WALK_HEIGHT_PERTURBATION_FREQUENCY_HZ="${WALK_HEIGHT_PERTURBATION_FREQUENCY_HZ:-0.35}"
-WALK_FORCE_OPEN_ACCESS_DOORS="${WALK_FORCE_OPEN_ACCESS_DOORS:-True}"
-WALK_FORCE_OPEN_ACCESS_DOORS_MODE="${WALK_FORCE_OPEN_ACCESS_DOORS_MODE:-hide}"
-
-CAPTURE_WIDTH="${CAPTURE_WIDTH:-${RGB_WIDTH:-848}}"
-CAPTURE_HEIGHT="${CAPTURE_HEIGHT:-${RGB_HEIGHT:-480}}"
-SL_MAX_SAMPLES="${SL_MAX_SAMPLES:-128}"
-SL_PATTERN_DIR="${SL_PATTERN_DIR:-}"
-SL_PATTERN_WHITE="${SL_PATTERN_WHITE:-white.png}"
-RGB_FORCE_LIGHTING="${RGB_FORCE_LIGHTING:-True}"
-RGB_WORLD_STRENGTH="${RGB_WORLD_STRENGTH:-0.25}"
-RGB_SUN_ENERGY="${RGB_SUN_ENERGY:-1.0}"
-RGB_CAMERA_LIGHT_ENERGY="${RGB_CAMERA_LIGHT_ENERGY:-120.0}"
-RGB_FORCE_DENOISING="${RGB_FORCE_DENOISING:-True}"
-RGB_DISABLE_CAUSTICS="${RGB_DISABLE_CAUSTICS:-True}"
-RGB_SAMPLE_CLAMP_INDIRECT="${RGB_SAMPLE_CLAMP_INDIRECT:-0.75}"
-RGB_SAMPLE_CLAMP_DIRECT="${RGB_SAMPLE_CLAMP_DIRECT:-2.5}"
-
 DEPTH_HISTOGRAM_ENABLED="${DEPTH_HISTOGRAM_ENABLED:-1}"
 DEPTH_HISTOGRAM_BINS="${DEPTH_HISTOGRAM_BINS:-80}"
 DEPTH_HISTOGRAM_MIN_M="${DEPTH_HISTOGRAM_MIN_M:-0.0}"
 DEPTH_HISTOGRAM_MAX_M="${DEPTH_HISTOGRAM_MAX_M:-10.0}"
 DEPTH_HISTOGRAM_SAMPLE_LIMIT="${DEPTH_HISTOGRAM_SAMPLE_LIMIT:-200000}"
 
-REUSE_EXISTING_TRAJECTORY="${REUSE_EXISTING_TRAJECTORY:-1}"
+if [[ -z "${REUSE_EXISTING_TRAJECTORY+x}" ]]; then
+    if [[ "${SETTING}" == "test_traj" ]]; then
+        REUSE_EXISTING_TRAJECTORY=0
+    else
+        REUSE_EXISTING_TRAJECTORY=1
+    fi
+fi
 FRAME_RANGE="${FRAME_RANGE:-}"
 
 mkdir -p "${TRAJECTORY_DIR}" "${CAPTURE_ROOT}" "${CONFIG_DIR}" "${LOG_DIR}" "${STATS_DIR}"
@@ -210,47 +186,16 @@ CAPTURE_DONE_MARKER="${OUTPUT_DIR}/calibration/capture_complete.json"
 
 TRAJECTORY_CONFIGS=(benchmark.gin real_geometry_with_bump.gin whole_home_walk.gin)
 CAPTURE_CONFIGS=(benchmark.gin real_geometry_with_bump.gin whole_home_walk.gin structured_light.gin)
+if [[ -f "${SETTING_GIN_CONFIG}" ]]; then
+    TRAJECTORY_CONFIGS+=("${SETTING}.gin")
+    CAPTURE_CONFIGS+=("${SETTING}.gin")
+fi
 
-COMMON_OVERRIDES=("compose_indoors.terrain_enabled=False")
-TRAJECTORY_OVERRIDES=(
-    "animate_whole_home_walk.camera_height_m=${WALK_CAMERA_HEIGHT_M}"
-    "animate_whole_home_walk.planner_fps=${WALK_FPS}"
-    "animate_whole_home_walk.traversal_speed_mps=${WALK_TRAVERSAL_SPEED_MPS}"
-    "animate_whole_home_walk.orbit_speed_mps=${WALK_ORBIT_SPEED_MPS}"
-    "animate_whole_home_walk.traversal_point_step_m=${WALK_STEP_M}"
-    "animate_whole_home_walk.clearance_m=${WALK_CLEARANCE_M}"
-    "animate_whole_home_walk.path_margin_m=${WALK_PATH_MARGIN_M}"
-    "animate_whole_home_walk.path_resolution=${WALK_PATH_RESOLUTION}"
-    "animate_whole_home_walk.room_sweep_angle_deg=${WALK_ROOM_SWEEP_ANGLE_DEG}"
-    "animate_whole_home_walk.room_sweep_yaw_speed_deg_s=${WALK_ROOM_SWEEP_YAW_SPEED_DEG_S}"
-    "animate_whole_home_walk.enable_room_orbit=${WALK_ENABLE_ROOM_ORBIT}"
-    "animate_whole_home_walk.room_grid_step_m=${WALK_ROOM_GRID_STEP_M}"
-    "animate_whole_home_walk.height_perturbation_amplitude_m=${WALK_HEIGHT_PERTURBATION_AMPLITUDE_M}"
-    "animate_whole_home_walk.height_perturbation_frequency_hz=${WALK_HEIGHT_PERTURBATION_FREQUENCY_HZ}"
-    "animate_whole_home_walk.force_open_access_doors=${WALK_FORCE_OPEN_ACCESS_DOORS}"
-    "animate_whole_home_walk.force_open_access_doors_mode=\"${WALK_FORCE_OPEN_ACCESS_DOORS_MODE}\""
-)
+TRAJECTORY_OVERRIDES=()
 CAPTURE_OVERRIDES=(
-    "execute_tasks.use_scene_frame_range=True"
     "render_structured_light.sl_capture_manifest_path=\"${CAPTURE_MANIFEST}\""
-    "render_structured_light.sl_resolution_x=${CAPTURE_WIDTH}"
-    "render_structured_light.sl_resolution_y=${CAPTURE_HEIGHT}"
-    "render_structured_light.sl_max_samples=${SL_MAX_SAMPLES}"
-    "render_structured_light.sl_pattern_white=\"${SL_PATTERN_WHITE}\""
-    "render_structured_light.sl_preview_force_lighting=${RGB_FORCE_LIGHTING}"
-    "render_structured_light.sl_preview_world_strength=${RGB_WORLD_STRENGTH}"
-    "render_structured_light.sl_preview_sun_energy=${RGB_SUN_ENERGY}"
-    "render_structured_light.sl_preview_camera_light_energy=${RGB_CAMERA_LIGHT_ENERGY}"
-    "render_structured_light.sl_preview_force_denoising=${RGB_FORCE_DENOISING}"
-    "render_structured_light.sl_preview_disable_caustics=${RGB_DISABLE_CAUSTICS}"
-    "render_structured_light.sl_preview_sample_clamp_indirect=${RGB_SAMPLE_CLAMP_INDIRECT}"
-    "render_structured_light.sl_preview_sample_clamp_direct=${RGB_SAMPLE_CLAMP_DIRECT}"
     "render_structured_light.sl_resume=${RESUME_CAPTURE}"
 )
-
-if [[ -n "${SL_PATTERN_DIR}" ]]; then
-    CAPTURE_OVERRIDES+=("render_structured_light.sl_pattern_dir=\"${SL_PATTERN_DIR}\"")
-fi
 
 if [[ -n "${FRAME_RANGE}" ]]; then
     IFS=',' read -r FRAME_START FRAME_END <<<"${FRAME_RANGE}"
@@ -258,7 +203,7 @@ if [[ -n "${FRAME_RANGE}" ]]; then
         "execute_tasks.use_scene_frame_range=False"
         "execute_tasks.frame_range=[${FRAME_START},${FRAME_END}]"
         "render_structured_light.sl_frame_index_offset=${FRAME_START}"
-        "${CAPTURE_OVERRIDES[@]:1}"
+        "${CAPTURE_OVERRIDES[@]}"
     )
 fi
 
@@ -283,28 +228,20 @@ write_capture_settings() {
         echo "SETTING=${SETTING}"
         echo "CAPTURE_MANIFEST=${CAPTURE_MANIFEST}"
         echo "CAPTURE_MANIFEST_SOURCE=${CAPTURE_MANIFEST_SOURCE}"
+        if [[ -f "${SETTING_GIN_CONFIG}" ]]; then
+            echo "SETTING_GIN_CONFIG=${SETTING_GIN_CONFIG}"
+        fi
+        echo "TRAJECTORY_CONFIGS=${TRAJECTORY_CONFIGS[*]}"
+        echo "CAPTURE_CONFIGS=${CAPTURE_CONFIGS[*]}"
         echo "TRAJECTORY_DIR=${TRAJECTORY_DIR}"
         echo "CAPTURE_ROOT=${CAPTURE_ROOT}"
         echo "OUTPUT_DIR=${OUTPUT_DIR}"
         echo "STRUCTURED_LIGHT_DIR=${STRUCTURED_LIGHT_DIR}"
         echo "RESUME_CAPTURE=${RESUME_CAPTURE}"
+        echo "REUSE_EXISTING_TRAJECTORY=${REUSE_EXISTING_TRAJECTORY}"
         if [[ -n "${RESUME_FROM_FRAME}" ]]; then
             echo "RESUME_FROM_FRAME=${RESUME_FROM_FRAME}"
         fi
-        echo "CAPTURE_WIDTH=${CAPTURE_WIDTH}"
-        echo "CAPTURE_HEIGHT=${CAPTURE_HEIGHT}"
-        echo "SL_MAX_SAMPLES=${SL_MAX_SAMPLES}"
-        echo "RGB_FORCE_LIGHTING=${RGB_FORCE_LIGHTING}"
-        echo "RGB_WORLD_STRENGTH=${RGB_WORLD_STRENGTH}"
-        echo "RGB_SUN_ENERGY=${RGB_SUN_ENERGY}"
-        echo "RGB_CAMERA_LIGHT_ENERGY=${RGB_CAMERA_LIGHT_ENERGY}"
-        echo "RGB_FORCE_DENOISING=${RGB_FORCE_DENOISING}"
-        echo "RGB_DISABLE_CAUSTICS=${RGB_DISABLE_CAUSTICS}"
-        echo "RGB_SAMPLE_CLAMP_INDIRECT=${RGB_SAMPLE_CLAMP_INDIRECT}"
-        echo "RGB_SAMPLE_CLAMP_DIRECT=${RGB_SAMPLE_CLAMP_DIRECT}"
-        echo "WALK_FPS=${WALK_FPS}"
-        echo "WALK_TRAVERSAL_SPEED_MPS=${WALK_TRAVERSAL_SPEED_MPS}"
-        echo "WALK_STEP_M=${WALK_STEP_M}"
         if [[ -n "${FRAME_RANGE}" ]]; then
             echo "FRAME_RANGE=${FRAME_RANGE}"
         fi
@@ -325,9 +262,11 @@ print_header() {
     echo "  Capture root: ${CAPTURE_ROOT}"
     echo "  Manifest: ${CAPTURE_MANIFEST}"
     echo "  Manifest source: ${CAPTURE_MANIFEST_SOURCE}"
-    echo "  Resolution: ${CAPTURE_WIDTH}x${CAPTURE_HEIGHT}"
-    echo "  SL max samples: ${SL_MAX_SAMPLES}"
+    if [[ -f "${SETTING_GIN_CONFIG}" ]]; then
+        echo "  Setting gin: ${SETTING_GIN_CONFIG}"
+    fi
     echo "  Resume capture: ${RESUME_CAPTURE}"
+    echo "  Reuse existing trajectory: ${REUSE_EXISTING_TRAJECTORY}"
     if [[ -n "${RESUME_FROM_FRAME}" ]]; then
         echo "  Resume from frame: ${RESUME_FROM_FRAME}"
     fi
@@ -342,29 +281,36 @@ run_trajectory() {
         echo "Reusing trajectory scene at ${TRAJECTORY_DIR}/scene.blend"
         return
     fi
+    if [[ -f "${TRAJECTORY_DIR}/scene.blend" ]]; then
+        echo "Regenerating trajectory scene at ${TRAJECTORY_DIR}/scene.blend"
+    fi
 
     append_log_header "Trajectory"
-    "${PY_CMD[@]}" -m infinigen_examples.generate_indoors \
+    local cmd=("${PY_CMD[@]}" -m infinigen_examples.generate_indoors \
         --seed "${SCENE_SEED}" \
         --task trajectory \
         --input_folder "${SCENE_DIR}/coarse" \
         --output_folder "${TRAJECTORY_DIR}" \
-        -g "${TRAJECTORY_CONFIGS[@]}" \
-        -p "${COMMON_OVERRIDES[@]}" "${TRAJECTORY_OVERRIDES[@]}" \
-        >>"${RENDER_LOG}" 2>&1
+        -g "${TRAJECTORY_CONFIGS[@]}")
+    if [[ "${#TRAJECTORY_OVERRIDES[@]}" -gt 0 ]]; then
+        cmd+=(-p "${TRAJECTORY_OVERRIDES[@]}")
+    fi
+    "${cmd[@]}" >>"${RENDER_LOG}" 2>&1
 }
 
 run_capture() {
     append_log_header "Structured Light Capture"
     rm -f "${CAPTURE_DONE_MARKER}"
-    "${PY_CMD[@]}" -m infinigen_examples.generate_indoors \
+    local cmd=("${PY_CMD[@]}" -m infinigen_examples.generate_indoors \
         --seed "${SCENE_SEED}" \
         --task structured_light \
         --input_folder "${TRAJECTORY_DIR}" \
         --output_folder "${CAPTURE_ROOT}" \
-        -g "${CAPTURE_CONFIGS[@]}" \
-        -p "${COMMON_OVERRIDES[@]}" "${CAPTURE_OVERRIDES[@]}" \
-        >>"${RENDER_LOG}" 2>&1
+        -g "${CAPTURE_CONFIGS[@]}")
+    if [[ "${#CAPTURE_OVERRIDES[@]}" -gt 0 ]]; then
+        cmd+=(-p "${CAPTURE_OVERRIDES[@]}")
+    fi
+    "${cmd[@]}" >>"${RENDER_LOG}" 2>&1
 }
 
 write_done_marker() {

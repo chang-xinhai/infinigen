@@ -229,7 +229,7 @@ where:
 - `SCENE_DIR` is the seed root, for example `outputs/benchmark/structured_light_indoors/seed_42`
 - `SETTING` selects the capture manifest and the output directory name, for example `test`, `rgb_only`, `debug`, or `full`
 
-The script infers `scene_seed` from the `seed_<N>` folder name, reuses or regenerates `trajectory/`, and then runs one manifest-driven structured-light capture task. The manifest is the single source of truth for which patterns, cameras, formats, and calibration payloads are written.
+The script infers `scene_seed` from the `seed_<N>` folder name, reuses or regenerates `trajectory/`, and then runs one manifest-driven structured-light capture task. The manifest is the single source of truth for which patterns, cameras, formats, and calibration payloads are written. The matching `infinigen_examples/configs_indoor/<setting>.gin` file is the single source of truth for trajectory tuning, preview resolution, and structured-light render defaults for that setting.
 
 Important detail:
 
@@ -253,11 +253,6 @@ Recommended command:
 
 ```bash
 CONDA_ENV=infinigen_311 \
-WALK_FPS=8 \
-WALK_STEP_M=0.05 \
-CAPTURE_WIDTH=848 \
-CAPTURE_HEIGHT=480 \
-SL_MAX_SAMPLES=128 \
 bash scripts/launch/capture_existing_seed_scene.sh \
     outputs/benchmark/structured_light_indoors/seed_42 \
     full
@@ -265,6 +260,7 @@ bash scripts/launch/capture_existing_seed_scene.sh \
 
 This setting:
 
+- uses `infinigen_examples/configs_indoor/full.gin` for the built-in trajectory and render defaults
 - writes reusable walking animation to `seed_<N>/trajectory/`
 - writes the capture to `seed_<N>/capture/full/`
 - writes the selected manifest to `capture/full/config/capture_manifest.yaml`
@@ -282,16 +278,12 @@ Recommended command:
 
 ```bash
 CONDA_ENV=infinigen_311 \
-WALK_FPS=8 \
-WALK_STEP_M=0.05 \
-CAPTURE_WIDTH=320 \
-CAPTURE_HEIGHT=240 \
 bash scripts/launch/capture_existing_seed_scene.sh \
     outputs/benchmark/structured_light_indoors/seed_42 \
     rgb_only
 ```
 
-This setting uses `infinigen_examples/configs_indoor/capture_manifests/rgb_only.yaml`, disables L/R image export, and still writes RGB image, depth, normal, plus aggregate calibration under `seed_<N>/capture/rgb_only/output/`.
+This setting uses `infinigen_examples/configs_indoor/rgb_only.gin` together with `infinigen_examples/configs_indoor/capture_manifests/rgb_only.yaml`, disables L/R image export, and still writes RGB image, depth, normal, plus aggregate calibration under `seed_<N>/capture/rgb_only/output/`.
 
 ### Debug
 
@@ -299,13 +291,12 @@ For quick structured-light checks with one pattern and optional JSONL calibratio
 
 ```bash
 CONDA_ENV=infinigen_311 \
-WALK_FPS=8 \
-CAPTURE_WIDTH=320 \
-CAPTURE_HEIGHT=240 \
 bash scripts/launch/capture_existing_seed_scene.sh \
     outputs/benchmark/structured_light_indoors/seed_42 \
     debug
 ```
+
+This setting uses `infinigen_examples/configs_indoor/debug.gin` plus `infinigen_examples/configs_indoor/capture_manifests/debug.yaml`.
 
 ### Test
 
@@ -313,14 +304,43 @@ For the lightest built-in capture that still keeps one structured-light pattern:
 
 ```bash
 CONDA_ENV=infinigen_311 \
-CAPTURE_WIDTH=848 \
-CAPTURE_HEIGHT=480 \
 bash scripts/launch/capture_existing_seed_scene.sh \
     outputs/benchmark/structured_light_indoors/seed_42 \
     test
 ```
 
-This setting uses `infinigen_examples/configs_indoor/capture_manifests/test.yaml`, keeps only `rgb/image/*.png`, and writes one `d435` pattern image per IR camera.
+This setting uses `infinigen_examples/configs_indoor/test.gin` together with `infinigen_examples/configs_indoor/capture_manifests/test.yaml`, keeps only `rgb/image/*.png`, and writes one `d435` pattern image per IR camera.
+
+### Test Trajectory
+
+For handheld-like trajectory tuning with reduced render cost, use:
+
+```bash
+CONDA_ENV=infinigen \
+FRAME_RANGE=0,39 \
+timeout 1h bash scripts/launch/capture_existing_seed_scene.sh \
+    outputs/benchmark/structured_light_indoors/seed_42 \
+    test_traj
+```
+
+This preset combines:
+
+- `infinigen_examples/configs_indoor/test_traj.gin` for smoother walk defaults plus preview render settings
+- `infinigen_examples/configs_indoor/capture_manifests/test_traj.yaml` for `rgb/image/*.png` plus one `d435` image per IR camera
+- `planner_fps = 16`
+- `traversal_speed_mps = 0.48`
+- `traversal_point_step_m = 0.03`
+- `room_sweep_angle_deg = 60.0`
+- `enable_room_orbit = False`
+- `handheld_lateral_amplitude_m = 0.0`
+- `handheld_yaw_amplitude_deg = 0.0`
+- `render_structured_light.sl_resolution_x = 320`
+- `render_structured_light.sl_resolution_y = 240`
+- `render_structured_light.sl_max_samples = 6`
+
+`test_traj` regenerates `trajectory/` by default so trajectory-tuning changes take effect immediately. Set `REUSE_EXISTING_TRAJECTORY=1` only when you intentionally want to inspect an already-saved animation.
+
+Use `FRAME_RANGE=start,end` to render only a short clip while checking motion quality, and wrap the command with shell `timeout 1h` to cap exploratory runs.
 
 The rerun layout is now:
 
@@ -365,11 +385,6 @@ Recommended H100 submission flow with the current `scripts/submit.sh` resource r
 CONDA_ENV=infinigen_311 \
 MAX_PARALLEL_SCENES=8 \
 TOTAL_CPUS=120 \
-WALK_FPS=8 \
-WALK_STEP_M=0.05 \
-CAPTURE_WIDTH=848 \
-CAPTURE_HEIGHT=480 \
-SL_MAX_SAMPLES=128 \
 sbatch scripts/submit.sh \
     bash scripts/launch/capture_existing_seed_scenes_parallel.sh \
     outputs/benchmark/structured_light_indoors \
@@ -385,41 +400,31 @@ Useful overrides:
 - `MAX_PARALLEL_SCENES=<N>` reduces concurrency below the number of visible GPUs
 - `DONE_MARKER_REL=...` changes the completion check if you want a stricter or looser resume policy; the default is now `capture/<setting>/output/calibration/capture_complete.json`
 - `SUBMIT_USE_SRUN=1` restores the old nested-`srun` launch behavior if your cluster needs it
-- all single-scene knobs such as `WALK_*`, `CAPTURE_*`, `SL_MAX_SAMPLES`, and `CAPTURE_MANIFEST` are forwarded to `capture_existing_seed_scene.sh`
+- `CAPTURE_MANIFEST`, `FRAME_RANGE`, `REUSE_EXISTING_TRAJECTORY`, and `DEPTH_HISTOGRAM_*` are still runtime controls inherited by each single-scene job
 
-### Main Knobs
+### Main Config Files
 
-Important trajectory controls:
+Edit the setting gin when you want to change trajectory or render defaults:
 
-- `WALK_CAMERA_HEIGHT_M`
-- `WALK_FPS`
-- `WALK_TRAVERSAL_SPEED_MPS`
-- `WALK_ORBIT_SPEED_MPS`
-- `WALK_STEP_M`
-- `WALK_CLEARANCE_M`
-- `WALK_PATH_MARGIN_M`
-- `WALK_ROOM_SWEEP_ANGLE_DEG`
-- `WALK_ROOM_SWEEP_YAW_SPEED_DEG_S`
-- `WALK_ENABLE_ROOM_ORBIT`
-- `WALK_ROOM_GRID_STEP_M`
-- `WALK_HEIGHT_PERTURBATION_AMPLITUDE_M`
-- `WALK_HEIGHT_PERTURBATION_FREQUENCY_HZ`
-- `WALK_FORCE_OPEN_ACCESS_DOORS`
-- `WALK_FORCE_OPEN_ACCESS_DOORS_MODE`
+- `infinigen_examples/configs_indoor/full.gin`
+- `infinigen_examples/configs_indoor/test.gin`
+- `infinigen_examples/configs_indoor/test_traj.gin`
+- `infinigen_examples/configs_indoor/rgb_only.gin`
+- `infinigen_examples/configs_indoor/debug.gin`
 
-Important capture controls:
+The shared built-in defaults for the non-`test_traj` presets live in:
 
-- `CAPTURE_WIDTH`
-- `CAPTURE_HEIGHT`
-- `SL_MAX_SAMPLES`
+- `infinigen_examples/configs_indoor/capture_existing_seed_defaults.gin`
+
+Use the manifest when you want to change which cameras, patterns, output formats, or calibration payloads are written:
+
 - `CAPTURE_MANIFEST`
-- `SL_PATTERN_DIR`
-- `SL_PATTERN_WHITE`
 
-Behavior is controlled by the selected capture manifest. The built-in defaults live under:
+The built-in manifests live under:
 
 - `infinigen_examples/configs_indoor/capture_manifests/full.yaml`
 - `infinigen_examples/configs_indoor/capture_manifests/test.yaml`
+- `infinigen_examples/configs_indoor/capture_manifests/test_traj.yaml`
 - `infinigen_examples/configs_indoor/capture_manifests/rgb_only.yaml`
 - `infinigen_examples/configs_indoor/capture_manifests/debug.yaml`
 

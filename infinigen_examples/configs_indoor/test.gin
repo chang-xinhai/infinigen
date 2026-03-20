@@ -1,0 +1,2 @@
+include 'infinigen_examples/configs_indoor/capture_existing_seed_defaults.gin'
+

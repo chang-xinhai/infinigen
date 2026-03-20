@@ -1019,6 +1019,99 @@ def _append_in_place_sweep(
         )
 
 
+def _gaussian_kernel1d(sigma_frames: float) -> np.ndarray:
+    sigma_frames = max(float(sigma_frames), 1e-3)
+    radius = max(1, int(math.ceil(3.0 * sigma_frames)))
+    xs = np.arange(-radius, radius + 1, dtype=float)
+    kernel = np.exp(-0.5 * (xs / sigma_frames) ** 2)
+    kernel /= np.sum(kernel)
+    return kernel
+
+
+def _smooth_random_signal(
+    sample_count: int,
+    amplitude: float,
+    sigma_frames: float,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    sample_count = int(sample_count)
+    amplitude = max(0.0, float(amplitude))
+    if sample_count <= 0 or amplitude <= 1e-6:
+        return np.zeros(sample_count, dtype=float)
+
+    kernel = _gaussian_kernel1d(sigma_frames)
+    pad = len(kernel) // 2
+    noise = rng.standard_normal(sample_count + 2 * pad)
+    smooth = np.convolve(noise, kernel, mode="same")[pad: pad + sample_count]
+    smooth -= np.mean(smooth)
+    peak = float(np.max(np.abs(smooth))) if sample_count else 0.0
+    if peak <= 1e-6:
+        return np.zeros(sample_count, dtype=float)
+    return amplitude * smooth / peak
+
+
+def _forward_from_rotation(rotation: Euler) -> Vector:
+    yaw = rotation.z + math.pi / 2
+    return Vector((math.cos(yaw), math.sin(yaw), 0.0))
+
+
+def _sample_forward_direction(
+    locations: list[Vector],
+    rotations: list[Euler],
+    idx: int,
+    window: int,
+) -> Vector:
+    if not locations:
+        return Vector((0.0, 1.0, 0.0))
+
+    window = max(1, int(window))
+    start_idx = max(0, idx - window)
+    end_idx = min(len(locations) - 1, idx + window)
+    delta = locations[end_idx] - locations[start_idx]
+    delta.z = 0.0
+    if delta.length > 1e-6:
+        return delta.normalized()
+
+    for offset in (1, 2):
+        prev_idx = max(0, idx - offset)
+        next_idx = min(len(locations) - 1, idx + offset)
+        delta = locations[next_idx] - locations[prev_idx]
+        delta.z = 0.0
+        if delta.length > 1e-6:
+            return delta.normalized()
+
+    if 0 <= idx < len(rotations):
+        return _forward_from_rotation(rotations[idx])
+    return Vector((0.0, 1.0, 0.0))
+
+
+def _orbit_focus_direction(
+    location: Vector,
+    center: Vector,
+    phase: float,
+    sweep_angle_deg: float,
+    focus_blend: float,
+) -> Vector:
+    to_center = center - location
+    to_center.z = 0.0
+    if to_center.length <= 1e-6:
+        to_center = Vector((math.cos(phase), math.sin(phase), 0.0))
+    else:
+        to_center.normalize()
+
+    tangent = Vector((-math.sin(phase), math.cos(phase), 0.0))
+    if sweep_angle_deg < 0.0:
+        tangent *= -1.0
+    tangent.normalize()
+
+    focus_blend = _clamp(float(focus_blend), 0.0, 1.0)
+    direction = focus_blend * to_center + (1.0 - focus_blend) * tangent
+    if direction.length <= 1e-6:
+        direction = to_center
+    direction.normalize()
+    return direction
+
+
 def _append_orbit_sweep(
     samples: list[dict],
     center: Vector,
@@ -1029,10 +1122,65 @@ def _append_orbit_sweep(
     orbit_linear_speed_mps: float,
     pitch_deg: float,
     start_phase_deg: float = 0.0,
+    start_location: Vector | None = None,
+    start_rotation: Euler | None = None,
+    entry_transition_sec: float = 0.35,
+    focus_blend: float = 0.88,
 ):
+    phase_start = math.radians(start_phase_deg)
+    if start_location is not None:
+        radial = start_location - center
+        radial.z = 0.0
+        if radial.length > 1e-6:
+            phase_start = math.atan2(radial.y, radial.x)
+        elif start_rotation is not None:
+            forward = _forward_from_rotation(start_rotation)
+            phase_start = math.atan2(forward.y, forward.x)
+
+    start_orbit = Vector(
+        (
+            center.x + orbit_radius_m * math.cos(phase_start),
+            center.y + orbit_radius_m * math.sin(phase_start),
+            center.z,
+        )
+    )
+    if start_location is not None:
+        transition_len = (start_orbit - start_location).length
+        if transition_len > 1e-6:
+            transition_frames = max(
+                2,
+                int(
+                    math.ceil(
+                        max(
+                            transition_len / max(orbit_linear_speed_mps, 1e-3),
+                            max(entry_transition_sec, 0.0),
+                        )
+                        * fps
+                    )
+                ),
+            )
+            for frame_idx in range(1, transition_frames + 1):
+                alpha = frame_idx / transition_frames
+                eased_alpha = 0.5 - 0.5 * math.cos(math.pi * alpha)
+                location = start_location.lerp(start_orbit, eased_alpha)
+                direction = _orbit_focus_direction(
+                    location=location,
+                    center=center,
+                    phase=phase_start,
+                    sweep_angle_deg=sweep_angle_deg,
+                    focus_blend=focus_blend,
+                )
+                samples.append(
+                    {
+                        "location": location,
+                        "rotation": _look_rotation(location, location + direction, pitch_deg=pitch_deg),
+                        "room": room_name,
+                        "state": "room_orbit_entry",
+                    }
+                )
+
     path_len = math.radians(abs(sweep_angle_deg)) * orbit_radius_m
     n_frames = max(8, int(math.ceil(path_len / max(orbit_linear_speed_mps, 1e-3) * fps)))
-    phase_start = math.radians(start_phase_deg)
     phase_end = phase_start + math.radians(sweep_angle_deg)
     for frame_idx in range(n_frames):
         alpha = frame_idx / max(n_frames - 1, 1)
@@ -1044,11 +1192,19 @@ def _append_orbit_sweep(
                 center.z,
             )
         )
-        target = center.copy()
+        if samples and (location - samples[-1]["location"]).length < 1e-6:
+            continue
+        direction = _orbit_focus_direction(
+            location=location,
+            center=center,
+            phase=phase,
+            sweep_angle_deg=sweep_angle_deg,
+            focus_blend=focus_blend,
+        )
         samples.append(
             {
                 "location": location,
-                "rotation": _look_rotation(location, target, pitch_deg=pitch_deg),
+                "rotation": _look_rotation(location, location + direction, pitch_deg=pitch_deg),
                 "room": room_name,
                 "state": "room_orbit",
             }
@@ -1165,6 +1321,105 @@ def _apply_height_perturbation(
     }
 
 
+def _apply_handheld_perturbation(
+    samples: list[dict],
+    planner_fps: int,
+    scene_seed: int,
+    lateral_amplitude_m: float,
+    yaw_amplitude_deg: float,
+    pitch_amplitude_deg: float,
+    noise_sigma_s: float,
+    forward_smoothing_window: int,
+) -> dict:
+    sample_count = len(samples)
+    summary = {
+        "enabled": False,
+        "lateral_amplitude_m": float(max(0.0, lateral_amplitude_m)),
+        "yaw_amplitude_deg": float(max(0.0, yaw_amplitude_deg)),
+        "pitch_amplitude_deg": float(max(0.0, pitch_amplitude_deg)),
+        "noise_sigma_s": float(max(0.0, noise_sigma_s)),
+        "forward_smoothing_window": int(max(1, forward_smoothing_window)),
+        "min_lateral_offset_m": 0.0,
+        "max_lateral_offset_m": 0.0,
+        "min_yaw_offset_deg": 0.0,
+        "max_yaw_offset_deg": 0.0,
+        "min_pitch_offset_deg": 0.0,
+        "max_pitch_offset_deg": 0.0,
+    }
+    if sample_count == 0 or planner_fps <= 0:
+        return summary
+
+    lateral_amplitude_m = max(0.0, float(lateral_amplitude_m))
+    yaw_amplitude_deg = max(0.0, float(yaw_amplitude_deg))
+    pitch_amplitude_deg = max(0.0, float(pitch_amplitude_deg))
+    noise_sigma_s = max(0.0, float(noise_sigma_s))
+    forward_smoothing_window = max(1, int(forward_smoothing_window))
+    if (
+        lateral_amplitude_m <= 1e-6
+        and yaw_amplitude_deg <= 1e-6
+        and pitch_amplitude_deg <= 1e-6
+    ) or noise_sigma_s <= 1e-6:
+        for sample in samples:
+            sample["handheld_lateral_offset_m"] = 0.0
+            sample["handheld_yaw_offset_deg"] = 0.0
+            sample["handheld_pitch_offset_deg"] = 0.0
+        return summary
+
+    rng = np.random.default_rng(scene_seed + 104729)
+    sigma_frames = max(noise_sigma_s * planner_fps, 1.0)
+    lateral_offsets = _smooth_random_signal(sample_count, lateral_amplitude_m, sigma_frames, rng)
+    yaw_offsets = _smooth_random_signal(sample_count, yaw_amplitude_deg, sigma_frames, rng)
+    pitch_offsets = _smooth_random_signal(sample_count, pitch_amplitude_deg, sigma_frames, rng)
+
+    original_locations = [sample["location"].copy() for sample in samples]
+    original_rotations = [sample["rotation"].copy() for sample in samples]
+    for idx, sample in enumerate(samples):
+        forward = _sample_forward_direction(
+            locations=original_locations,
+            rotations=original_rotations,
+            idx=idx,
+            window=forward_smoothing_window,
+        )
+        lateral = Vector((-forward.y, forward.x, 0.0))
+        if lateral.length > 1e-6:
+            lateral.normalize()
+        sample["location"] += lateral * float(lateral_offsets[idx])
+        sample["handheld_lateral_offset_m"] = float(lateral_offsets[idx])
+
+    updated_locations = [sample["location"].copy() for sample in samples]
+    for idx, sample in enumerate(samples):
+        forward = _sample_forward_direction(
+            locations=updated_locations,
+            rotations=original_rotations,
+            idx=idx,
+            window=forward_smoothing_window,
+        )
+        target = sample["location"] + forward
+        base_pitch_deg = math.degrees(original_rotations[idx].x - math.pi / 2)
+        rotation = _look_rotation(
+            sample["location"],
+            target,
+            pitch_deg=base_pitch_deg + float(pitch_offsets[idx]),
+        )
+        rotation.z += math.radians(float(yaw_offsets[idx]))
+        sample["rotation"] = rotation
+        sample["handheld_yaw_offset_deg"] = float(yaw_offsets[idx])
+        sample["handheld_pitch_offset_deg"] = float(pitch_offsets[idx])
+
+    summary.update(
+        {
+            "enabled": True,
+            "min_lateral_offset_m": float(np.min(lateral_offsets)),
+            "max_lateral_offset_m": float(np.max(lateral_offsets)),
+            "min_yaw_offset_deg": float(np.min(yaw_offsets)),
+            "max_yaw_offset_deg": float(np.max(yaw_offsets)),
+            "min_pitch_offset_deg": float(np.min(pitch_offsets)),
+            "max_pitch_offset_deg": float(np.max(pitch_offsets)),
+        }
+    )
+    return summary
+
+
 @gin.configurable
 def animate_whole_home_walk(
     input_folder: Path,
@@ -1202,6 +1457,13 @@ def animate_whole_home_walk(
     traversal_lookahead_pts: int = 5,
     height_perturbation_amplitude_m: float = 0.0,
     height_perturbation_frequency_hz: float = 0.35,
+    handheld_lateral_amplitude_m: float = 0.0,
+    handheld_yaw_amplitude_deg: float = 0.0,
+    handheld_pitch_amplitude_deg: float = 0.0,
+    handheld_noise_sigma_s: float = 0.35,
+    handheld_forward_smoothing_window: int = 4,
+    orbit_entry_transition_sec: float = 0.35,
+    orbit_focus_blend: float = 0.88,
     force_open_access_doors: bool = True,
     force_open_access_doors_mode: str = "hide",
 ):
@@ -1306,6 +1568,10 @@ def animate_whole_home_walk(
                 sweep_angle_deg=room_sweep_angle_deg if not final_pass else min(room_sweep_angle_deg, 180.0),
                 orbit_linear_speed_mps=orbit_speed_mps,
                 pitch_deg=sweep_pitch_deg,
+                start_location=None if not samples else samples[-1]["location"].copy(),
+                start_rotation=None if not samples else samples[-1]["rotation"].copy(),
+                entry_transition_sec=orbit_entry_transition_sec,
+                focus_blend=orbit_focus_blend,
             )
         else:
             start_yaw = 0.0 if not samples else math.degrees(samples[-1]["rotation"].z + math.pi / 2)
@@ -1356,12 +1622,16 @@ def animate_whole_home_walk(
                 forbidden_bboxes=forbidden_room_bboxes.get(dst),
             )
 
+        src_start = rooms[src].center
+        if samples and samples[-1]["room"] == src:
+            src_start = samples[-1]["location"].copy()
+
         if room_path_mode == "collision_aware_grid" and src_room_obj is not None and dst_room_obj is not None:
             seg_a = _collision_aware_room_path_segment(
                 room=rooms[src],
                 room_obj=src_room_obj,
                 room_bvh=src_room_bvh,
-                start=rooms[src].center,
+                start=src_start,
                 end=src_anchor,
                 linear_step_m=linear_step_m,
                 clearance_m=clearance_m,
@@ -1382,7 +1652,7 @@ def animate_whole_home_walk(
         elif room_path_mode in {"collision_aware_grid", "orthogonal"}:
             seg_a = _room_path_segment(
                 room=rooms[src],
-                start=rooms[src].center,
+                start=src_start,
                 end=src_anchor,
                 linear_step_m=linear_step_m,
                 clearance_m=clearance_m,
@@ -1396,7 +1666,7 @@ def animate_whole_home_walk(
             )
         elif room_path_mode == "straight":
             seg_a = _path_segment(
-                start=rooms[src].center,
+                start=src_start,
                 end=src_anchor,
                 linear_step_m=linear_step_m,
             )
@@ -1451,6 +1721,17 @@ def animate_whole_home_walk(
             pitch_deg=traversal_pitch_deg,
             repair_margin_m=collision_repair_margin_m,
         )
+
+    handheld_perturbation = _apply_handheld_perturbation(
+        samples=samples,
+        planner_fps=planner_fps,
+        scene_seed=scene_seed,
+        lateral_amplitude_m=handheld_lateral_amplitude_m,
+        yaw_amplitude_deg=handheld_yaw_amplitude_deg,
+        pitch_amplitude_deg=handheld_pitch_amplitude_deg,
+        noise_sigma_s=handheld_noise_sigma_s,
+        forward_smoothing_window=handheld_forward_smoothing_window,
+    )
 
     height_perturbation = _apply_height_perturbation(
         samples=samples,
@@ -1509,6 +1790,14 @@ def animate_whole_home_walk(
         "sweep_pitch_deg": sweep_pitch_deg,
         "height_perturbation_amplitude_m": height_perturbation_amplitude_m,
         "height_perturbation_frequency_hz": height_perturbation_frequency_hz,
+        "handheld_lateral_amplitude_m": handheld_lateral_amplitude_m,
+        "handheld_yaw_amplitude_deg": handheld_yaw_amplitude_deg,
+        "handheld_pitch_amplitude_deg": handheld_pitch_amplitude_deg,
+        "handheld_noise_sigma_s": handheld_noise_sigma_s,
+        "handheld_forward_smoothing_window": handheld_forward_smoothing_window,
+        "handheld_perturbation": handheld_perturbation,
+        "orbit_entry_transition_sec": orbit_entry_transition_sec,
+        "orbit_focus_blend": orbit_focus_blend,
         "height_perturbation": height_perturbation,
         "force_open_access_doors": force_open_access_doors,
         "force_open_access_doors_mode": force_open_access_doors_mode,

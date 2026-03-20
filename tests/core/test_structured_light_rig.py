@@ -414,3 +414,19 @@ def test_test_manifest_keeps_only_rgb_and_single_d435_pattern():
     assert manifest["cameras"]["rgb"]["outputs"] == {"image": ["png"]}
     assert manifest["cameras"]["left"]["outputs"] == {"image": ["png"]}
     assert manifest["cameras"]["right"]["outputs"] == {"image": ["png"]}
+
+
+def test_test_traj_manifest_keeps_only_rgb_and_single_d435_pattern():
+    manifest = _load_capture_manifest(
+        infinigen.repo_root()
+        / "infinigen_examples"
+        / "configs_indoor"
+        / "capture_manifests"
+        / "test_traj.yaml"
+    )
+
+    assert manifest["setting"] == "test_traj"
+    assert manifest["patterns"]["names"] == ["d435"]
+    assert manifest["cameras"]["rgb"]["outputs"] == {"image": ["png"]}
+    assert manifest["cameras"]["left"]["outputs"] == {"image": ["png"]}
+    assert manifest["cameras"]["right"]["outputs"] == {"image": ["png"]}

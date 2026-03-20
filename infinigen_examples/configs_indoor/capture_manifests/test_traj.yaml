@@ -1,0 +1,26 @@
+setting: test_traj
+patterns:
+  names:
+    - d435
+  white: white.png
+cameras:
+  rgb:
+    outputs:
+      image:
+        - png
+    calibration:
+      intrinsic: true
+      extrinsic: true
+  left:
+    outputs: {}
+    calibration:
+      intrinsic: false
+      extrinsic: false
+  right:
+    outputs: {}
+    calibration:
+      intrinsic: false
+      extrinsic: false
+calibration:
+  save_npz: true
+  save_jsonl: false
