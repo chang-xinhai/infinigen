@@ -378,7 +378,7 @@ seed_<N>/
 For multi-GPU reruns on already-generated scenes under `outputs/benchmark/structured_light_indoors/seed_<N>`, use:
 
 ```bash
-bash scripts/launch/capture_existing_seed_scenes_parallel.sh [OUTPUT_ROOT] [SETTING]
+bash scripts/launch/capture_existing_seed_scenes_parallel.sh [OUTPUT_ROOT] [SETTING] [single-scene args...]
 ```
 
 The script:
@@ -387,7 +387,10 @@ The script:
 - keeps only scenes with `coarse/scene.blend`
 - skips already-completed scenes by default when `capture/<setting>/output/calibration/capture_complete.json` exists
 - dynamically assigns the remaining scenes across available GPUs so faster workers keep pulling new scenes
+- forwards any extra CLI arguments directly to `scripts/launch/capture_existing_seed_scene.sh`, so batch reruns stay aligned with the latest single-scene workflow
+- gives each scene invocation an isolated runtime directory for `TMPDIR`, `MPLCONFIGDIR`, XDG cache/config, and Blender user config paths to avoid worker interference
 - writes a batch summary to `OUTPUT_ROOT/logs/existing_seed_capture/summary_<setting>_<timestamp>.tsv`
+- archives the batch launch settings to `OUTPUT_ROOT/logs/existing_seed_capture/batch_<setting>_<timestamp>.env`
 
 Recommended H100 submission flow with the current `scripts/submit.sh` resource request of `8` GPUs and `120` CPUs:
 
@@ -403,12 +406,27 @@ sbatch scripts/submit.sh \
 
 `scripts/submit.sh` now executes the payload directly inside the batch allocation by default instead of wrapping it in a nested `srun` step. This avoids cluster setups where `srun` fails host lookup during step launch with errors such as `Unable to resolve "node003"`. If your SLURM deployment requires `srun`, set `SUBMIT_USE_SRUN=1` in the submission environment.
 
+To batch-resume partially completed captures with the exact single-scene semantics, append the same flags you would use for one scene:
+
+```bash
+CONDA_ENV=infinigen_311 \
+MAX_PARALLEL_SCENES=8 \
+TOTAL_CPUS=120 \
+bash scripts/launch/capture_existing_seed_scenes_parallel.sh \
+    outputs/benchmark/structured_light_indoors \
+    full \
+    --resume \
+    --resume-from 120
+```
+
 Useful overrides:
 
 - `SKIP_COMPLETED=0` forces rerender even when the done marker already exists
 - `GPU_IDS=0,1,2,3,4,5,6,7` pins the worker pool to an explicit GPU list
 - `MAX_PARALLEL_SCENES=<N>` reduces concurrency below the number of visible GPUs
 - `DONE_MARKER_REL=...` changes the completion check if you want a stricter or looser resume policy; the default is now `capture/<setting>/output/calibration/capture_complete.json`
+- `ISOLATE_RUNTIME=0` disables the per-scene runtime sandbox if you explicitly want all workers to share the caller's temp/cache paths
+- `KEEP_RUNTIME=1` preserves the batch runtime directory under the temporary parent for postmortem debugging
 - `SUBMIT_USE_SRUN=1` restores the old nested-`srun` launch behavior if your cluster needs it
 - `CAPTURE_MANIFEST`, `FRAME_RANGE`, `REUSE_EXISTING_TRAJECTORY`, and `DEPTH_HISTOGRAM_*` are still runtime controls inherited by each single-scene job
 

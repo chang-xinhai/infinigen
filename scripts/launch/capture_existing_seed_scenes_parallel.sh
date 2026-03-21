@@ -2,7 +2,7 @@
 # Batch capture existing benchmark seed scenes across multiple GPUs on one node.
 #
 # Usage:
-#   bash scripts/launch/capture_existing_seed_scenes_parallel.sh [OUTPUT_ROOT] [SETTING]
+#   bash scripts/launch/capture_existing_seed_scenes_parallel.sh [OUTPUT_ROOT] [SETTING] [single-scene args...]
 #
 # Example:
 #   CONDA_ENV=infinigen_311 \
@@ -10,12 +10,50 @@
 #   TOTAL_CPUS=120 \
 #   bash scripts/launch/capture_existing_seed_scenes_parallel.sh \
 #       outputs/benchmark/structured_light_indoors \
-#       full
+#       full \
+#       --resume
 
 set -euo pipefail
 
-OUTPUT_ROOT="${OUTPUT_ROOT:-${1:-outputs/benchmark/structured_light_indoors}}"
-SETTING="${SETTING:-${2:-${CAPTURE_SETTING:-full}}}"
+usage() {
+    echo "Usage: bash scripts/launch/capture_existing_seed_scenes_parallel.sh [OUTPUT_ROOT] [SETTING] [single-scene args...]"
+    echo ""
+    echo "Positional arguments:"
+    echo "  OUTPUT_ROOT         Defaults to outputs/benchmark/structured_light_indoors"
+    echo "  SETTING             Defaults to CAPTURE_SETTING or full"
+    echo "  single-scene args   Forwarded verbatim to capture_existing_seed_scene.sh"
+}
+
+shell_join() {
+    local quoted=()
+    local arg
+    for arg in "$@"; do
+        quoted+=("$(printf '%q' "${arg}")")
+    done
+    printf '%s' "${quoted[*]:-}"
+}
+
+POSITIONAL_ARGS=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            POSITIONAL_ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
+
+OUTPUT_ROOT="${OUTPUT_ROOT:-${POSITIONAL_ARGS[0]:-outputs/benchmark/structured_light_indoors}}"
+SETTING="${SETTING:-${POSITIONAL_ARGS[1]:-${CAPTURE_SETTING:-full}}}"
+CAPTURE_ARGS=()
+if [[ "${#POSITIONAL_ARGS[@]}" -gt 2 ]]; then
+    CAPTURE_ARGS=("${POSITIONAL_ARGS[@]:2}")
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -29,8 +67,11 @@ MAX_PARALLEL_SCENES="${MAX_PARALLEL_SCENES:-0}"
 GPU_IDS_RAW="${GPU_IDS:-${CUDA_VISIBLE_DEVICES:-}}"
 QUEUE_POLL_INTERVAL_S="${QUEUE_POLL_INTERVAL_S:-0.05}"
 DRY_RUN="${DRY_RUN:-0}"
+ISOLATE_RUNTIME="${ISOLATE_RUNTIME:-1}"
+KEEP_RUNTIME="${KEEP_RUNTIME:-0}"
 RUN_ID="$(date +%Y%m%d_%H%M%S)"
 SUMMARY_DIR="${SUMMARY_DIR:-${OUTPUT_ROOT}/logs/existing_seed_capture}"
+RUNTIME_PARENT="${RUNTIME_PARENT:-${TMPDIR:-/tmp}}"
 
 if [[ ! -f "${CAPTURE_SCRIPT}" ]]; then
     echo "Capture script not found: ${CAPTURE_SCRIPT}"
@@ -49,6 +90,16 @@ fi
 
 if ! [[ "${MAX_PARALLEL_SCENES}" =~ ^[0-9]+$ ]]; then
     echo "MAX_PARALLEL_SCENES must be a non-negative integer, got: ${MAX_PARALLEL_SCENES}"
+    exit 1
+fi
+
+if [[ "${ISOLATE_RUNTIME}" != "0" && "${ISOLATE_RUNTIME}" != "1" ]]; then
+    echo "ISOLATE_RUNTIME must be 0 or 1, got: ${ISOLATE_RUNTIME}"
+    exit 1
+fi
+
+if [[ "${KEEP_RUNTIME}" != "0" && "${KEEP_RUNTIME}" != "1" ]]; then
+    echo "KEEP_RUNTIME must be 0 or 1, got: ${KEEP_RUNTIME}"
     exit 1
 fi
 
@@ -129,31 +180,101 @@ next_scene() {
     printf '%s\n' "${scene_dir}"
 }
 
-run_capture_command() {
-    local scene_dir="$1"
-    local gpu_id="$2"
-    local cpu_set="$3"
-    local thread_count="$4"
+prepare_runtime_dir() {
+    local slot="$1"
+    local scene_name="$2"
+    local runtime_dir
 
-    if command -v taskset >/dev/null 2>&1; then
-        CUDA_VISIBLE_DEVICES="${gpu_id}" \
-        OMP_NUM_THREADS="${thread_count}" \
-        OPENBLAS_NUM_THREADS="${thread_count}" \
-        MKL_NUM_THREADS="${thread_count}" \
-        NUMEXPR_NUM_THREADS="${thread_count}" \
-        PYTHONUNBUFFERED=1 \
-        taskset -c "${cpu_set}" \
-        bash "${CAPTURE_SCRIPT}" "${scene_dir}" "${SETTING}"
+    runtime_dir="$(mktemp -d "${RUN_DIR}/runtime/${scene_name}.slot_${slot}.XXXXXX")"
+    mkdir -p \
+        "${runtime_dir}/tmp" \
+        "${runtime_dir}/mpl" \
+        "${runtime_dir}/xdg-cache" \
+        "${runtime_dir}/xdg-config" \
+        "${runtime_dir}/xdg-data" \
+        "${runtime_dir}/blender/config" \
+        "${runtime_dir}/blender/scripts" \
+        "${runtime_dir}/blender/datafiles"
+    printf '%s\n' "${runtime_dir}"
+}
+
+cleanup_runtime_dir() {
+    local runtime_dir="$1"
+    if [[ "${KEEP_RUNTIME}" == "1" || -z "${runtime_dir}" ]]; then
         return
     fi
+    rm -rf "${runtime_dir}"
+}
 
-    CUDA_VISIBLE_DEVICES="${gpu_id}" \
-    OMP_NUM_THREADS="${thread_count}" \
-    OPENBLAS_NUM_THREADS="${thread_count}" \
-    MKL_NUM_THREADS="${thread_count}" \
-    NUMEXPR_NUM_THREADS="${thread_count}" \
-    PYTHONUNBUFFERED=1 \
-    bash "${CAPTURE_SCRIPT}" "${scene_dir}" "${SETTING}"
+run_capture_command() {
+    local slot="$1"
+    local scene_dir="$2"
+    local scene_name="$3"
+    local gpu_id="$4"
+    local cpu_set="$5"
+    local thread_count="$6"
+    local runtime_dir=""
+    local -a env_cmd=(
+        env
+        "CUDA_VISIBLE_DEVICES=${gpu_id}"
+        "OMP_NUM_THREADS=${thread_count}"
+        "OPENBLAS_NUM_THREADS=${thread_count}"
+        "MKL_NUM_THREADS=${thread_count}"
+        "NUMEXPR_NUM_THREADS=${thread_count}"
+        "PYTHONUNBUFFERED=1"
+    )
+    local -a cmd=(bash "${CAPTURE_SCRIPT}" "${scene_dir}" "${SETTING}" "${CAPTURE_ARGS[@]}")
+
+    if [[ "${ISOLATE_RUNTIME}" == "1" ]]; then
+        runtime_dir="$(prepare_runtime_dir "${slot}" "${scene_name}")"
+        env_cmd+=(
+            "TMPDIR=${runtime_dir}/tmp"
+            "TMP=${runtime_dir}/tmp"
+            "TEMP=${runtime_dir}/tmp"
+            "MPLCONFIGDIR=${runtime_dir}/mpl"
+            "XDG_CACHE_HOME=${runtime_dir}/xdg-cache"
+            "XDG_CONFIG_HOME=${runtime_dir}/xdg-config"
+            "XDG_DATA_HOME=${runtime_dir}/xdg-data"
+            "BLENDER_USER_CONFIG=${runtime_dir}/blender/config"
+            "BLENDER_USER_SCRIPTS=${runtime_dir}/blender/scripts"
+            "BLENDER_USER_DATAFILES=${runtime_dir}/blender/datafiles"
+        )
+    fi
+
+    if command -v taskset >/dev/null 2>&1; then
+        cmd=(taskset -c "${cpu_set}" "${cmd[@]}")
+    fi
+
+    set +e
+    "${env_cmd[@]}" "${cmd[@]}"
+    local rc=$?
+
+    if [[ "${rc}" -eq 0 ]]; then
+        cleanup_runtime_dir "${runtime_dir}"
+    fi
+
+    LAST_RUNTIME_DIR="${runtime_dir}"
+    return "${rc}"
+}
+
+write_batch_config() {
+    {
+        echo "OUTPUT_ROOT=${OUTPUT_ROOT}"
+        echo "SETTING=${SETTING}"
+        echo "CAPTURE_SCRIPT=${CAPTURE_SCRIPT}"
+        echo "SKIP_COMPLETED=${SKIP_COMPLETED}"
+        echo "DONE_MARKER_REL=${DONE_MARKER_REL}"
+        echo "SCENE_GLOB=${SCENE_GLOB}"
+        echo "TOTAL_CPUS=${TOTAL_CPUS}"
+        echo "MAX_PARALLEL_SCENES=${MAX_PARALLEL_SCENES}"
+        echo "GPU_IDS_RAW=${GPU_IDS_RAW}"
+        echo "QUEUE_POLL_INTERVAL_S=${QUEUE_POLL_INTERVAL_S}"
+        echo "DRY_RUN=${DRY_RUN}"
+        echo "ISOLATE_RUNTIME=${ISOLATE_RUNTIME}"
+        echo "KEEP_RUNTIME=${KEEP_RUNTIME}"
+        echo "RUN_ID=${RUN_ID}"
+        echo "CAPTURE_ARGS=$(shell_join "${CAPTURE_ARGS[@]}")"
+    } >"${BATCH_CONFIG_FILE}"
 }
 
 worker_loop() {
@@ -164,6 +285,7 @@ worker_loop() {
     local status_file="${RUN_DIR}/worker_${slot}.tsv"
     local scene_dir
     local scene_name
+    local runtime_dir
     local rc
 
     : >"${status_file}"
@@ -182,17 +304,23 @@ worker_loop() {
             continue
         fi
 
+        LAST_RUNTIME_DIR=""
         set +e
-        run_capture_command "${scene_dir}" "${gpu_id}" "${cpu_set}" "${thread_count}"
+        run_capture_command "${slot}" "${scene_dir}" "${scene_name}" "${gpu_id}" "${cpu_set}" "${thread_count}"
         rc=$?
         set -e
+        runtime_dir="${LAST_RUNTIME_DIR:-}"
 
         if [[ "${rc}" -eq 0 ]]; then
             printf '%s\tsuccess\t%s\t%s\n' "${scene_name}" "${gpu_id}" "${cpu_set}" >>"${status_file}"
             echo "[worker ${slot}] done scene=${scene_name} gpu=${gpu_id}"
         else
             printf '%s\tfailed(%s)\t%s\t%s\n' "${scene_name}" "${rc}" "${gpu_id}" "${cpu_set}" >>"${status_file}"
-            echo "[worker ${slot}] failed scene=${scene_name} gpu=${gpu_id} rc=${rc}"
+            if [[ -n "${runtime_dir}" ]]; then
+                echo "[worker ${slot}] failed scene=${scene_name} gpu=${gpu_id} rc=${rc} runtime=${runtime_dir}"
+            else
+                echo "[worker ${slot}] failed scene=${scene_name} gpu=${gpu_id} rc=${rc}"
+            fi
         fi
     done
 }
@@ -254,25 +382,33 @@ if [[ "${TOTAL_CPUS}" -lt "${WORKER_COUNT}" ]]; then
 fi
 
 mkdir -p "${SUMMARY_DIR}"
-RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/capture_existing_seed_scenes_parallel.XXXXXX")"
+RUN_DIR="$(mktemp -d "${RUNTIME_PARENT%/}/capture_existing_seed_scenes_parallel.XXXXXX")"
+mkdir -p "${RUN_DIR}/runtime"
 QUEUE_FILE="${RUN_DIR}/queue.txt"
 QUEUE_INDEX_FILE="${RUN_DIR}/queue_index.txt"
 QUEUE_LOCK_DIR="${RUN_DIR}/queue.lock"
 SUMMARY_FILE="${SUMMARY_DIR}/summary_${SETTING}_${RUN_ID}.tsv"
+BATCH_CONFIG_FILE="${SUMMARY_DIR}/batch_${SETTING}_${RUN_ID}.env"
 
 cleanup() {
+    if [[ "${KEEP_RUNTIME}" == "1" ]]; then
+        echo "Retained batch runtime: ${RUN_DIR}"
+        return
+    fi
     rm -rf "${RUN_DIR}"
 }
 trap cleanup EXIT
 
 printf '%s\n' "${PENDING_SCENES[@]}" >"${QUEUE_FILE}"
 echo "1" >"${QUEUE_INDEX_FILE}"
+write_batch_config
 
 echo "═══════════════════════════════════════════════════════════"
 echo "  Parallel Existing Seed Capture"
 echo "  Output root: ${OUTPUT_ROOT}"
 echo "  Setting: ${SETTING}"
 echo "  Capture script: ${CAPTURE_SCRIPT}"
+echo "  Capture args: $(shell_join "${CAPTURE_ARGS[@]}")"
 echo "  Pending scenes: ${#PENDING_SCENES[@]}"
 echo "  Skipped completed: ${#SKIPPED_SCENES[@]}"
 echo "  Skipped invalid: ${#INVALID_SCENES[@]}"
@@ -281,6 +417,8 @@ echo "  Worker count: ${WORKER_COUNT}"
 echo "  Total CPUs: ${TOTAL_CPUS}"
 echo "  Skip completed: ${SKIP_COMPLETED}"
 echo "  Done marker: ${DONE_MARKER_REL}"
+echo "  Runtime isolation: ${ISOLATE_RUNTIME}"
+echo "  Batch config: ${BATCH_CONFIG_FILE}"
 echo "  Summary file: ${SUMMARY_FILE}"
 echo "═══════════════════════════════════════════════════════════"
 

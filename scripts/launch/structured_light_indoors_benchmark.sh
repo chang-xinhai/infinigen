@@ -22,7 +22,7 @@
 
 set -euo pipefail
 
-NUM_SCENES="${NUM_SCENES:-${1:-100}}"
+NUM_SCENES="${NUM_SCENES:-${1:-1}}"
 SEED_START="${SEED_START:-${2:-0}}"
 ROOM_TYPE="${ROOM_TYPE:-${3:-ALL}}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-${4:-outputs/benchmark/structured_light_indoors}}"
