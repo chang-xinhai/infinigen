@@ -380,7 +380,8 @@ class StructuredLightRig:
                 continue
         logger.warning(
             "Projectors addon not found; using manual spot light projector. "
-            "For best results, install https://github.com/Ocupe/Projectors"
+            "For exact reproduction install https://github.com/Ocupe/Projectors "
+            "or run bash scripts/install/install_projectors_addon.sh from the repo root."
         )
         return False
 

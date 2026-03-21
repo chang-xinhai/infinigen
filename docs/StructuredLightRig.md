@@ -61,6 +61,34 @@ With the default config, pattern assets are loaded from the built-in repository
 directory `data/patterns/`. Use `render_structured_light.sl_pattern_dir` only
 when you intentionally want to override those shipped assets.
 
+## Projector addon dependency
+
+For exact cross-machine reproduction, install the external Blender addon
+[`Ocupe/Projectors`](https://github.com/Ocupe/Projectors). The structured-light
+renderer first tries to enable that addon by module name and uses
+`bpy.ops.projector.create()` when it is available.
+
+If the addon is missing, Infinigen falls back to a manual spot-light projector.
+That fallback is useful for debugging and keeps the pipeline runnable, but it is
+not an exact-match environment.
+
+Recommended install command from the repository root:
+
+```bash
+bash scripts/install/install_projectors_addon.sh
+```
+
+Reproducibility checklist for a fresh machine:
+
+- create and activate the intended conda environment
+- install Infinigen
+- install the `Projectors` Blender addon
+- keep `render_structured_light.sl_pattern_dir = None` unless you intentionally
+  want to override the in-repo `data/patterns/` assets
+- use an explicit `--seed` for scene generation and capture
+- run `scripts/launch/structured_light_indoors.sh` or the benchmark capture
+  scripts from this repository rather than ad-hoc commands
+
 ## Pattern capture lighting
 
 RGB baseline captures now render with the structured-light projector disabled.

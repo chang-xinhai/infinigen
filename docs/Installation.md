@@ -84,6 +84,39 @@ pre-commit install
 
 :exclamation: If you encounter any issues with the above, please add `-vv > logs.txt 2>&1` to the end of your command and run again, then provide the resulting logs.txt file as an attachment when making a Github Issue.
 
+### Additional setup for exact structured-light reproduction
+
+If you plan to run the structured-light pipeline, the base `pip install -e .` environment is not fully self-contained by itself.
+
+Pattern images are shipped in-repo under `data/patterns/`, but the projector implementation has two modes:
+
+- Recommended / exact reproduction: install the external Blender addon [`Ocupe/Projectors`](https://github.com/Ocupe/Projectors)
+- Fallback mode: if the addon is missing, Infinigen falls back to a manual spot-light projector and logs a warning
+
+The fallback path keeps the pipeline runnable, but it is not the exact same projector implementation and outputs may differ. For parity across machines, install the addon explicitly.
+
+Recommended headless install:
+
+```bash
+bash scripts/install/install_projectors_addon.sh
+```
+
+The install script:
+
+- clones `https://github.com/Ocupe/Projectors.git` into `~/.cache/deepsl-setup/Projectors`
+- links it into the active Blender addons directory as `Projectors`
+- works without opening the Blender GUI when the addons path can be resolved automatically or is passed through `BLENDER_ADDONS=/path/to/addons`
+
+If you prefer Blender's own install flow instead, install the ZIP from the Blender GUI, or use a `bpy` script on headless machines:
+
+```python
+import bpy
+bpy.app.binary_path = "<blender_bin_path>"
+bpy.ops.preferences.addon_install(filepath="<path_to_downloaded_zip>")
+```
+
+After installation, make sure the addon appears as `Projectors` in Blender. The structured-light renderer will attempt to enable module names such as `Projectors` automatically at runtime.
+
 ## Installing Infinigen as a Blender Python script
 
 On Linux / Mac / WSL:
@@ -108,6 +141,14 @@ INFINIGEN_INSTALL_CUSTOMGT=True bash scripts/install/interactive_blender.sh
 ```
 
 :exclamation: If you encounter any issues with the above, please add ` > logs.txt 2>&1` to the end of your command and run again, then provide the resulting logs.txt file as an attachment when making a Github Issue.
+
+For exact structured-light reproduction on this installation path, also run:
+
+```bash
+bash scripts/install/install_projectors_addon.sh
+```
+
+Without that addon, structured-light rendering falls back to a manual spot-light projector, which is useful for debugging but is not the intended parity path across machines.
 
 Once complete, you can use the helper script `python -m infinigen.launch_blender` to launch a blender UI, which will find and execute the `blender` executable in your `infinigen/blender` or `infinigen/Blender.app` folder.
 
