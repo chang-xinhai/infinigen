@@ -364,6 +364,9 @@ class StructuredLightRig:
 
     def _try_enable_projector_addon(self) -> bool:
         candidates = [
+            "bl_ext.user_default.projector",
+            "bl_ext.system.projector",
+            "projector",
             "Projectors-main",
             "projectors-main",
             "projectors_main",

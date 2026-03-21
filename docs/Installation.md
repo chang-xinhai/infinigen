@@ -104,9 +104,11 @@ bash scripts/install/install_projectors_addon.sh
 The install script:
 
 - clones `https://github.com/Ocupe/Projectors.git` into `~/.cache/deepsl-setup/Projectors`
-- links it into the active Blender addons directory as `Projectors`
+- for Blender 4.2 extension-style packages, links it into the user extension repo, typically `~/.config/blender/4.2/extensions/user_default/projector`
+- otherwise links it into the active Blender addons directory as `Projectors`
 - works without opening the Blender GUI when the addons path can be resolved automatically or is passed through `BLENDER_ADDONS=/path/to/addons`
 - auto-detects Blender from `BLENDER_BIN`, from `PATH`, or from the repository-bundled Blender install
+- uses the standard user-addon location under `.../scripts/addons` for the repository-bundled Blender, creating that directory if Blender 4.2 only ships `addons_core`
 - auto-downloads Blender 4.2 into the repository root if no existing Blender installation can be found and `AUTO_INSTALL_BLENDER=1`
 
 If you prefer Blender's own install flow instead, install the ZIP from the Blender GUI, or use a `bpy` script on headless machines:
@@ -117,7 +119,7 @@ bpy.app.binary_path = "<blender_bin_path>"
 bpy.ops.preferences.addon_install(filepath="<path_to_downloaded_zip>")
 ```
 
-After installation, make sure the addon appears as `Projectors` in Blender. The structured-light renderer will attempt to enable module names such as `Projectors` automatically at runtime.
+After installation, make sure the addon or extension appears in Blender. For current Blender 4.2 builds of `Ocupe/Projectors`, the runtime module name is typically `bl_ext.user_default.projector`. The structured-light renderer will attempt to enable that module automatically at runtime.
 
 ## Installing Infinigen as a Blender Python script
 
