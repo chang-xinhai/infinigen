@@ -106,6 +106,8 @@ The install script:
 - clones `https://github.com/Ocupe/Projectors.git` into `~/.cache/deepsl-setup/Projectors`
 - links it into the active Blender addons directory as `Projectors`
 - works without opening the Blender GUI when the addons path can be resolved automatically or is passed through `BLENDER_ADDONS=/path/to/addons`
+- auto-detects Blender from `BLENDER_BIN`, from `PATH`, or from the repository-bundled Blender install
+- auto-downloads Blender 4.2 into the repository root if no existing Blender installation can be found and `AUTO_INSTALL_BLENDER=1`
 
 If you prefer Blender's own install flow instead, install the ZIP from the Blender GUI, or use a `bpy` script on headless machines:
 

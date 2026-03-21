@@ -78,6 +78,14 @@ Recommended install command from the repository root:
 bash scripts/install/install_projectors_addon.sh
 ```
 
+That install script now tries, in order:
+
+- an explicit `BLENDER_ADDONS=/path/to/.../scripts/addons`
+- an explicit `BLENDER_BIN=/path/to/blender`
+- `blender` from `PATH`
+- the repository-bundled Blender install
+- automatic download of Blender 4.2 into the repository root when no installation is found
+
 Reproducibility checklist for a fresh machine:
 
 - create and activate the intended conda environment
