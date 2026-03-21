@@ -2,11 +2,11 @@ include 'infinigen_examples/configs_indoor/capture_existing_seed_defaults.gin'
 
 animate_whole_home_walk.planner_fps = 10
 animate_whole_home_walk.traversal_speed_mps = 0.30
-animate_whole_home_walk.orbit_speed_mps = 0.24
+animate_whole_home_walk.orbit_speed_mps = 0.10
 animate_whole_home_walk.traversal_point_step_m = 0.03
 
 animate_whole_home_walk.room_sweep_angle_deg = 90.0
-animate_whole_home_walk.room_sweep_yaw_speed_deg_s = 30.0
+animate_whole_home_walk.room_sweep_yaw_speed_deg_s = 12.0
 
 animate_whole_home_walk.enable_room_orbit = True
 animate_whole_home_walk.room_orbit_min_room_radius_m = 1.20
