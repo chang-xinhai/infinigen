@@ -8,6 +8,7 @@
 #   CONDA_ENV=infinigen_311 \
 #   MAX_PARALLEL_SCENES=8 \
 #   TOTAL_CPUS=120 \
+#   GPU_IDS=2,3,4 \
 #   bash scripts/launch/capture_existing_seed_scenes_parallel.sh \
 #       outputs/benchmark/structured_light_indoors \
 #       full \
