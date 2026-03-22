@@ -241,6 +241,9 @@ Important detail:
 Resume notes:
 
 - `--resume` keeps the existing output tree and skips frames whose required outputs already exist
+- `CAPTURE_LOG_MODE=compact` is now the default and keeps only the first `CAPTURE_LOG_LINES` lines plus the last `CAPTURE_LOG_LINES` lines in `capture/<setting>/logs/render.log`
+- in compact mode, `capture/<setting>/logs/render.tail.log` is updated as a live rolling tail while the job is active
+- set `CAPTURE_LOG_MODE=full` to keep the previous full merged log behavior, or `CAPTURE_LOG_MODE=none` to disable command stdout/stderr capture entirely
 - if a frame’s images are present but its calibration record is missing, resume will append the missing calibration entry without rerendering the frame
 - `--resume-from N` forces resume to start considering frames from capture index `N`
 - incremental calibration progress is written to `capture/<setting>/output/calibration/calibration.jsonl`
@@ -265,6 +268,7 @@ This setting:
 - writes the capture to `seed_<N>/capture/full/`
 - writes the selected manifest to `capture/full/config/capture_manifest.yaml`
 - writes the merged run log to `capture/full/logs/render.log`
+- default log retention is compact: `render.log` keeps the first 100 lines and the last 100 lines, while `render.tail.log` mirrors the live rolling tail during the run
 - writes the scene-level depth histogram summary to `capture/full/stats/depth_histogram.{json,png}`
 - writes selected pattern png files to `capture/full/structured_light/patterns/`
 - writes actual render outputs to `capture/full/output/`
@@ -362,7 +366,8 @@ seed_<N>/
     └── <setting>/
         ├── config/
         ├── logs/
-        │   └── render.log
+        │   ├── render.log
+        │   └── render.tail.log
         ├── output/
         │   ├── calibration/
         │   ├── rgb/
@@ -391,6 +396,7 @@ The script:
 - gives each scene invocation an isolated runtime directory for `TMPDIR`, `MPLCONFIGDIR`, XDG cache/config, and Blender user config paths to avoid worker interference
 - writes a batch summary to `OUTPUT_ROOT/logs/existing_seed_capture/summary_<setting>_<timestamp>.tsv`
 - archives the batch launch settings to `OUTPUT_ROOT/logs/existing_seed_capture/batch_<setting>_<timestamp>.env`
+- forwards `CAPTURE_LOG_MODE` and `CAPTURE_LOG_LINES` through the environment so every scene can use compact, full, or disabled logging consistently
 
 Recommended H100 submission flow with the current `scripts/submit.sh` resource request of `8` GPUs and `120` CPUs:
 
@@ -421,6 +427,8 @@ bash scripts/launch/capture_existing_seed_scenes_parallel.sh \
 
 Useful overrides:
 
+- `CAPTURE_LOG_MODE=compact|full|none` controls per-scene log retention; `compact` is the default
+- `CAPTURE_LOG_LINES=<N>` changes how many first and last lines are kept in compact mode; the default is `100`
 - `SKIP_COMPLETED=0` forces rerender even when the done marker already exists
 - `GPU_IDS=0,1,2,3,4,5,6,7` pins the worker pool to an explicit GPU list
 - `MAX_PARALLEL_SCENES=<N>` reduces concurrency below the number of visible GPUs

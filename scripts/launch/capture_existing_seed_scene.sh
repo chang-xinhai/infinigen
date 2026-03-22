@@ -17,6 +17,9 @@ set -euo pipefail
 
 usage() {
     echo "Usage: bash scripts/launch/capture_existing_seed_scene.sh <SCENE_DIR> [SETTING] [--resume] [--resume-from N]"
+    echo "Env:"
+    echo "  CAPTURE_LOG_MODE   compact (default), full, or none"
+    echo "  CAPTURE_LOG_LINES  Number of first/last lines kept in compact mode (default: 100)"
 }
 
 SCENE_DIR=""
@@ -165,6 +168,18 @@ DEPTH_HISTOGRAM_BINS="${DEPTH_HISTOGRAM_BINS:-80}"
 DEPTH_HISTOGRAM_MIN_M="${DEPTH_HISTOGRAM_MIN_M:-0.0}"
 DEPTH_HISTOGRAM_MAX_M="${DEPTH_HISTOGRAM_MAX_M:-10.0}"
 DEPTH_HISTOGRAM_SAMPLE_LIMIT="${DEPTH_HISTOGRAM_SAMPLE_LIMIT:-200000}"
+CAPTURE_LOG_MODE="${CAPTURE_LOG_MODE:-compact}"
+CAPTURE_LOG_LINES="${CAPTURE_LOG_LINES:-100}"
+
+if [[ "${CAPTURE_LOG_MODE}" != "compact" && "${CAPTURE_LOG_MODE}" != "full" && "${CAPTURE_LOG_MODE}" != "none" ]]; then
+    echo "CAPTURE_LOG_MODE must be one of compact, full, none; got: ${CAPTURE_LOG_MODE}"
+    exit 1
+fi
+
+if ! [[ "${CAPTURE_LOG_LINES}" =~ ^[0-9]+$ ]] || [[ "${CAPTURE_LOG_LINES}" -lt 1 ]]; then
+    echo "CAPTURE_LOG_LINES must be a positive integer, got: ${CAPTURE_LOG_LINES}"
+    exit 1
+fi
 
 if [[ -z "${REUSE_EXISTING_TRAJECTORY+x}" ]]; then
     if [[ "${SETTING}" == "test_traj" ]]; then
@@ -178,6 +193,9 @@ FRAME_RANGE="${FRAME_RANGE:-}"
 mkdir -p "${TRAJECTORY_DIR}" "${CAPTURE_ROOT}" "${CONFIG_DIR}" "${LOG_DIR}" "${STATS_DIR}"
 
 RENDER_LOG="${LOG_DIR}/render.log"
+RENDER_LOG_HEAD="${LOG_DIR}/render.head.log"
+RENDER_LOG_TAIL="${LOG_DIR}/render.tail.log"
+RENDER_LOG_COUNT="${LOG_DIR}/render.line_count"
 CAPTURE_SETTINGS_FILE="${CONFIG_DIR}/capture_settings.env"
 CAPTURE_MANIFEST_COPY="${CONFIG_DIR}/capture_manifest.yaml"
 DEPTH_HISTOGRAM_JSON="${STATS_DIR}/depth_histogram.json"
@@ -211,14 +229,147 @@ if [[ -n "${RESUME_FROM_FRAME}" ]]; then
     CAPTURE_OVERRIDES+=("render_structured_light.sl_resume_from_frame=${RESUME_FROM_FRAME}")
 fi
 
+rebuild_compact_log_state_from_render_log() {
+    head -n "${CAPTURE_LOG_LINES}" "${RENDER_LOG}" >"${RENDER_LOG_HEAD}"
+    tail -n "${CAPTURE_LOG_LINES}" "${RENDER_LOG}" >"${RENDER_LOG_TAIL}"
+    awk 'END {print NR + 0}' "${RENDER_LOG}" >"${RENDER_LOG_COUNT}"
+}
+
+initialize_log_state() {
+    if [[ "${RESUME_CAPTURE}" != "1" ]]; then
+        : >"${RENDER_LOG}"
+        : >"${RENDER_LOG_HEAD}"
+        : >"${RENDER_LOG_TAIL}"
+        echo "0" >"${RENDER_LOG_COUNT}"
+        return
+    fi
+
+    touch "${RENDER_LOG}" "${RENDER_LOG_HEAD}" "${RENDER_LOG_TAIL}"
+    if [[ "${CAPTURE_LOG_MODE}" == "compact" ]]; then
+        if [[ ! -f "${RENDER_LOG_COUNT}" ]]; then
+            if [[ -s "${RENDER_LOG}" ]]; then
+                rebuild_compact_log_state_from_render_log
+            else
+                echo "0" >"${RENDER_LOG_COUNT}"
+            fi
+        fi
+    elif [[ ! -f "${RENDER_LOG_COUNT}" ]]; then
+        echo "0" >"${RENDER_LOG_COUNT}"
+    fi
+}
+
+log_stream() {
+    local line
+    local count=0
+    local -a tail_buffer=()
+    local start_index=0
+
+    case "${CAPTURE_LOG_MODE}" in
+        full)
+            cat >>"${RENDER_LOG}"
+            ;;
+        none)
+            cat >/dev/null
+            ;;
+        compact)
+            if [[ -f "${RENDER_LOG_COUNT}" ]]; then
+                count="$(<"${RENDER_LOG_COUNT}")"
+            fi
+            if [[ -s "${RENDER_LOG_TAIL}" ]]; then
+                mapfile -t tail_buffer <"${RENDER_LOG_TAIL}"
+            fi
+            while IFS= read -r line || [[ -n "${line}" ]]; do
+                count=$((count + 1))
+                if [[ "${count}" -le "${CAPTURE_LOG_LINES}" ]]; then
+                    printf '%s\n' "${line}" >>"${RENDER_LOG_HEAD}"
+                fi
+                tail_buffer+=("${line}")
+                if [[ "${#tail_buffer[@]}" -gt "${CAPTURE_LOG_LINES}" ]]; then
+                    start_index=$((${#tail_buffer[@]} - CAPTURE_LOG_LINES))
+                    tail_buffer=("${tail_buffer[@]:${start_index}}")
+                fi
+                printf '%s\n' "${tail_buffer[@]}" >"${RENDER_LOG_TAIL}"
+            done
+            printf '%s\n' "${count}" >"${RENDER_LOG_COUNT}"
+            ;;
+    esac
+}
+
+log_text() {
+    if [[ "$#" -eq 0 ]]; then
+        return
+    fi
+    printf '%s\n' "$@" | log_stream
+}
+
 append_log_header() {
     local stage="$1"
-    {
-        echo ""
-        echo "================================================================"
-        echo "### ${stage}"
-        echo "================================================================"
-    } >>"${RENDER_LOG}"
+    log_text \
+        "" \
+        "================================================================" \
+        "### ${stage}" \
+        "================================================================"
+}
+
+run_logged_command() {
+    local status_file
+    local rc
+
+    status_file="$(mktemp)"
+    (
+        set +e
+        "$@"
+        rc=$?
+        printf '%s\n' "${rc}" >"${status_file}"
+        exit 0
+    ) 2>&1 | log_stream
+    rc="$(<"${status_file}")"
+    rm -f "${status_file}"
+    return "${rc}"
+}
+
+finalize_log() {
+    local total_lines=0
+    local overlap=0
+
+    case "${CAPTURE_LOG_MODE}" in
+        full)
+            return
+            ;;
+        none)
+            cat >"${RENDER_LOG}" <<EOF_NONE
+Log mode: none
+Command stdout/stderr was not recorded.
+EOF_NONE
+            return
+            ;;
+        compact)
+            if [[ -f "${RENDER_LOG_COUNT}" ]]; then
+                total_lines="$(<"${RENDER_LOG_COUNT}")"
+            fi
+            : >"${RENDER_LOG}"
+            if [[ "${total_lines}" -le "${CAPTURE_LOG_LINES}" ]]; then
+                cat "${RENDER_LOG_HEAD}" >>"${RENDER_LOG}"
+                return
+            fi
+            cat "${RENDER_LOG_HEAD}" >>"${RENDER_LOG}"
+            if [[ "${total_lines}" -le $((CAPTURE_LOG_LINES * 2)) ]]; then
+                overlap=$((CAPTURE_LOG_LINES * 2 - total_lines))
+                tail -n "+$((overlap + 1))" "${RENDER_LOG_TAIL}" >>"${RENDER_LOG}"
+                return
+            fi
+            {
+                echo ""
+                echo "================================================================"
+                echo "### Log truncated"
+                echo "================================================================"
+                echo "Kept first ${CAPTURE_LOG_LINES} lines and last ${CAPTURE_LOG_LINES} lines out of ${total_lines} total lines."
+                echo "Live rolling tail is mirrored to ${RENDER_LOG_TAIL} while the run is active."
+                echo ""
+            } >>"${RENDER_LOG}"
+            cat "${RENDER_LOG_TAIL}" >>"${RENDER_LOG}"
+            ;;
+    esac
 }
 
 write_capture_settings() {
@@ -239,6 +390,8 @@ write_capture_settings() {
         echo "STRUCTURED_LIGHT_DIR=${STRUCTURED_LIGHT_DIR}"
         echo "RESUME_CAPTURE=${RESUME_CAPTURE}"
         echo "REUSE_EXISTING_TRAJECTORY=${REUSE_EXISTING_TRAJECTORY}"
+        echo "CAPTURE_LOG_MODE=${CAPTURE_LOG_MODE}"
+        echo "CAPTURE_LOG_LINES=${CAPTURE_LOG_LINES}"
         if [[ -n "${RESUME_FROM_FRAME}" ]]; then
             echo "RESUME_FROM_FRAME=${RESUME_FROM_FRAME}"
         fi
@@ -267,6 +420,10 @@ print_header() {
     fi
     echo "  Resume capture: ${RESUME_CAPTURE}"
     echo "  Reuse existing trajectory: ${REUSE_EXISTING_TRAJECTORY}"
+    echo "  Log mode: ${CAPTURE_LOG_MODE}"
+    if [[ "${CAPTURE_LOG_MODE}" == "compact" ]]; then
+        echo "  Log lines kept: first ${CAPTURE_LOG_LINES} + last ${CAPTURE_LOG_LINES}"
+    fi
     if [[ -n "${RESUME_FROM_FRAME}" ]]; then
         echo "  Resume from frame: ${RESUME_FROM_FRAME}"
     fi
@@ -295,7 +452,7 @@ run_trajectory() {
     if [[ "${#TRAJECTORY_OVERRIDES[@]}" -gt 0 ]]; then
         cmd+=(-p "${TRAJECTORY_OVERRIDES[@]}")
     fi
-    "${cmd[@]}" >>"${RENDER_LOG}" 2>&1
+    run_logged_command "${cmd[@]}"
 }
 
 run_capture() {
@@ -310,14 +467,14 @@ run_capture() {
     if [[ "${#CAPTURE_OVERRIDES[@]}" -gt 0 ]]; then
         cmd+=(-p "${CAPTURE_OVERRIDES[@]}")
     fi
-    "${cmd[@]}" >>"${RENDER_LOG}" 2>&1
+    run_logged_command "${cmd[@]}"
 }
 
 write_done_marker() {
     mkdir -p "$(dirname "${CAPTURE_DONE_MARKER}")"
-    cat >"${CAPTURE_DONE_MARKER}" <<EOF
+    cat >"${CAPTURE_DONE_MARKER}" <<EOF_DONE
 {"status":"complete","setting":"${SETTING}","scene_seed":"${SCENE_SEED}"}
-EOF
+EOF_DONE
 }
 
 run_depth_histogram() {
@@ -335,7 +492,7 @@ run_depth_histogram() {
         --min-depth-m "${DEPTH_HISTOGRAM_MIN_M}" \
         --max-depth-m "${DEPTH_HISTOGRAM_MAX_M}" \
         --quantile-sample-limit "${DEPTH_HISTOGRAM_SAMPLE_LIMIT}" \
-        >>"${RENDER_LOG}" 2>&1
+        |& log_stream
 }
 
 print_summary() {
@@ -366,6 +523,9 @@ print_summary() {
         echo "Depth histogram png: ${DEPTH_HISTOGRAM_PNG}"
     fi
     echo "Render log: ${RENDER_LOG}"
+    if [[ "${CAPTURE_LOG_MODE}" == "compact" ]]; then
+        echo "Live tail log: ${RENDER_LOG_TAIL}"
+    fi
 }
 
 prune_empty_dirs() {
@@ -373,11 +533,7 @@ prune_empty_dirs() {
     rmdir "${STATS_DIR}" 2>/dev/null || true
 }
 
-if [[ "${RESUME_CAPTURE}" != "1" ]]; then
-    : >"${RENDER_LOG}"
-else
-    touch "${RENDER_LOG}"
-fi
+initialize_log_state
 write_capture_settings
 print_header
 run_trajectory
@@ -385,4 +541,5 @@ run_capture
 run_depth_histogram
 write_done_marker
 prune_empty_dirs
+finalize_log
 print_summary

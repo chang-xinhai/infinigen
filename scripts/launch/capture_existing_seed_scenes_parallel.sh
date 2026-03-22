@@ -22,6 +22,10 @@ usage() {
     echo "  OUTPUT_ROOT         Defaults to outputs/benchmark/structured_light_indoors"
     echo "  SETTING             Defaults to CAPTURE_SETTING or full"
     echo "  single-scene args   Forwarded verbatim to capture_existing_seed_scene.sh"
+    echo ""
+    echo "Useful env:"
+    echo "  CAPTURE_LOG_MODE    compact (default), full, or none"
+    echo "  CAPTURE_LOG_LINES   Number of first/last lines kept per scene in compact mode"
 }
 
 shell_join() {
@@ -272,6 +276,8 @@ write_batch_config() {
         echo "DRY_RUN=${DRY_RUN}"
         echo "ISOLATE_RUNTIME=${ISOLATE_RUNTIME}"
         echo "KEEP_RUNTIME=${KEEP_RUNTIME}"
+        echo "CAPTURE_LOG_MODE=${CAPTURE_LOG_MODE:-compact}"
+        echo "CAPTURE_LOG_LINES=${CAPTURE_LOG_LINES:-100}"
         echo "RUN_ID=${RUN_ID}"
         echo "CAPTURE_ARGS=$(shell_join "${CAPTURE_ARGS[@]}")"
     } >"${BATCH_CONFIG_FILE}"
@@ -418,6 +424,10 @@ echo "  Total CPUs: ${TOTAL_CPUS}"
 echo "  Skip completed: ${SKIP_COMPLETED}"
 echo "  Done marker: ${DONE_MARKER_REL}"
 echo "  Runtime isolation: ${ISOLATE_RUNTIME}"
+echo "  Log mode: ${CAPTURE_LOG_MODE:-compact}"
+if [[ "${CAPTURE_LOG_MODE:-compact}" == "compact" ]]; then
+    echo "  Log lines kept: first ${CAPTURE_LOG_LINES:-100} + last ${CAPTURE_LOG_LINES:-100}"
+fi
 echo "  Batch config: ${BATCH_CONFIG_FILE}"
 echo "  Summary file: ${SUMMARY_FILE}"
 echo "═══════════════════════════════════════════════════════════"
