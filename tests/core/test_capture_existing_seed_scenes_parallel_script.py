@@ -266,3 +266,82 @@ touch "$capture_root/output/calibration/capture_complete.json"
     forwarded_args = (seed_0 / "capture" / "full" / "forwarded_args.txt").read_text(encoding="utf-8").strip()
     assert forwarded_args == "--resume --resume-from 7"
     assert "Capture args: --resume --resume-from 7" in result.stdout
+
+
+def test_parallel_existing_seed_capture_inherits_blender_addon_paths_under_isolation(tmp_path):
+    repo_root = infinigen.repo_root()
+    script_path = repo_root / "scripts/launch/capture_existing_seed_scenes_parallel.sh"
+    fake_capture = tmp_path / "fake_capture_addons.sh"
+    output_root = tmp_path / "outputs" / "benchmark" / "structured_light_indoors"
+
+    seed_0 = _make_seed(output_root, 0)
+    caller_scripts = tmp_path / "caller_blender" / "scripts"
+    projectors_dir = caller_scripts / "addons" / "Projectors"
+    projectors_dir.mkdir(parents=True, exist_ok=True)
+    (projectors_dir / "__init__.py").write_text("def register():\n    pass\n", encoding="utf-8")
+
+    caller_extensions = tmp_path / "caller_config" / "blender" / "4.2" / "extensions" / "user_default"
+    projector_ext_dir = caller_extensions / "projector"
+    projector_ext_dir.mkdir(parents=True, exist_ok=True)
+    (projector_ext_dir / "blender_manifest.toml").write_text(
+        'schema_version = "1.0.0"\n'
+        'id = "projector"\n'
+        'name = "Projector"\n'
+        'version = "1.0.0"\n'
+        'type = "add-on"\n',
+        encoding="utf-8",
+    )
+
+    fake_capture.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+
+scene_dir="$1"
+setting="$2"
+capture_root="$scene_dir/capture/$setting"
+scripts_root="${BLENDER_USER_SCRIPTS:-}"
+projectors_link="$scripts_root/addons/Projectors"
+extension_link="${XDG_CONFIG_HOME:-}/blender/4.2/extensions/user_default/projector"
+
+mkdir -p "$capture_root/output/calibration"
+printf 'blender_user_scripts=%s\\nprojectors_link=%s\\nprojectors_target=%s\\nextension_link=%s\\nextension_target=%s\\n' \
+    "${scripts_root}" \
+    "$([[ -L "${projectors_link}" ]] && printf yes || printf no)" \
+    "$(if [[ -L "${projectors_link}" ]]; then readlink "${projectors_link}"; fi)" \
+    "$([[ -L "${extension_link}" ]] && printf yes || printf no)" \
+    "$(if [[ -L "${extension_link}" ]]; then readlink "${extension_link}"; fi)" \
+    > "$capture_root/addon_state.txt"
+touch "$capture_root/output/calibration/capture_complete.json"
+""",
+        encoding="utf-8",
+    )
+    fake_capture.chmod(fake_capture.stat().st_mode | stat.S_IEXEC)
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "CAPTURE_SCRIPT": str(fake_capture),
+            "GPU_IDS": "0",
+            "TOTAL_CPUS": "1",
+            "MAX_PARALLEL_SCENES": "1",
+            "BLENDER_USER_SCRIPTS": str(caller_scripts),
+            "BLENDER_EXTENSIONS_USER": str(caller_extensions),
+        }
+    )
+
+    result = subprocess.run(
+        ["bash", str(script_path), str(output_root), "full"],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    addon_state = (seed_0 / "capture" / "full" / "addon_state.txt").read_text(encoding="utf-8")
+    assert f"blender_user_scripts={caller_scripts}" not in addon_state
+    assert "projectors_link=yes" in addon_state
+    assert f"projectors_target={projectors_dir}" in addon_state
+    assert "extension_link=yes" in addon_state
+    assert f"extension_target={projector_ext_dir}" in addon_state

@@ -394,6 +394,7 @@ The script:
 - dynamically assigns the remaining scenes across available GPUs so faster workers keep pulling new scenes
 - forwards any extra CLI arguments directly to `scripts/launch/capture_existing_seed_scene.sh`, so batch reruns stay aligned with the latest single-scene workflow
 - gives each scene invocation an isolated runtime directory for `TMPDIR`, `MPLCONFIGDIR`, XDG cache/config, and Blender user config paths to avoid worker interference
+- when runtime isolation is enabled, mirrors caller-visible Blender user addons and extension repos into each isolated worker runtime so addons such as `Projectors` remain available
 - writes a batch summary to `OUTPUT_ROOT/logs/existing_seed_capture/summary_<setting>_<timestamp>.tsv`
 - archives the batch launch settings to `OUTPUT_ROOT/logs/existing_seed_capture/batch_<setting>_<timestamp>.env`
 - forwards `CAPTURE_LOG_MODE` and `CAPTURE_LOG_LINES` through the environment so every scene can use compact, full, or disabled logging consistently
@@ -434,6 +435,8 @@ Useful overrides:
 - `MAX_PARALLEL_SCENES=<N>` reduces concurrency below the number of visible GPUs
 - `DONE_MARKER_REL=...` changes the completion check if you want a stricter or looser resume policy; the default is now `capture/<setting>/output/calibration/capture_complete.json`
 - `ISOLATE_RUNTIME=0` disables the per-scene runtime sandbox if you explicitly want all workers to share the caller's temp/cache paths
+- `INHERIT_BLENDER_ADDONS=0` disables mirroring caller-visible Blender addons and extensions into the isolated worker runtime; the default is `1`
+- `BLENDER_USER_SCRIPTS=/path/to/.../scripts`, `BLENDER_ADDONS=/path/to/.../scripts/addons`, and `BLENDER_EXTENSIONS_USER=/path/to/.../extensions/user_default` let you point the isolated workers at explicit addon sources when auto-discovery is not enough
 - `KEEP_RUNTIME=1` preserves the batch runtime directory under the temporary parent for postmortem debugging
 - `SUBMIT_USE_SRUN=1` restores the old nested-`srun` launch behavior if your cluster needs it
 - `CAPTURE_MANIFEST`, `FRAME_RANGE`, `REUSE_EXISTING_TRAJECTORY`, and `DEPTH_HISTOGRAM_*` are still runtime controls inherited by each single-scene job

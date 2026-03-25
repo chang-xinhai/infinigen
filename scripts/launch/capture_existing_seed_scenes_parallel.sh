@@ -74,6 +74,7 @@ QUEUE_POLL_INTERVAL_S="${QUEUE_POLL_INTERVAL_S:-0.05}"
 DRY_RUN="${DRY_RUN:-0}"
 ISOLATE_RUNTIME="${ISOLATE_RUNTIME:-1}"
 KEEP_RUNTIME="${KEEP_RUNTIME:-0}"
+INHERIT_BLENDER_ADDONS="${INHERIT_BLENDER_ADDONS:-1}"
 RUN_ID="$(date +%Y%m%d_%H%M%S)"
 SUMMARY_DIR="${SUMMARY_DIR:-${OUTPUT_ROOT}/logs/existing_seed_capture}"
 RUNTIME_PARENT="${RUNTIME_PARENT:-${TMPDIR:-/tmp}}"
@@ -105,6 +106,11 @@ fi
 
 if [[ "${KEEP_RUNTIME}" != "0" && "${KEEP_RUNTIME}" != "1" ]]; then
     echo "KEEP_RUNTIME must be 0 or 1, got: ${KEEP_RUNTIME}"
+    exit 1
+fi
+
+if [[ "${INHERIT_BLENDER_ADDONS}" != "0" && "${INHERIT_BLENDER_ADDONS}" != "1" ]]; then
+    echo "INHERIT_BLENDER_ADDONS must be 0 or 1, got: ${INHERIT_BLENDER_ADDONS}"
     exit 1
 fi
 
@@ -203,6 +209,115 @@ prepare_runtime_dir() {
     printf '%s\n' "${runtime_dir}"
 }
 
+restore_shopt_state() {
+    local state="$1"
+    if [[ -n "${state}" ]]; then
+        eval "${state}"
+    fi
+}
+
+link_directory_entries() {
+    local src_dir="$1"
+    local dst_dir="$2"
+    local entry
+    local name
+    local nullglob_state
+    local dotglob_state
+
+    if [[ ! -d "${src_dir}" ]]; then
+        return
+    fi
+
+    mkdir -p "${dst_dir}"
+    nullglob_state="$(shopt -p nullglob || true)"
+    dotglob_state="$(shopt -p dotglob || true)"
+    shopt -s nullglob dotglob
+    for entry in "${src_dir}"/*; do
+        name="$(basename "${entry}")"
+        if [[ ! -e "${dst_dir}/${name}" ]]; then
+            ln -s "${entry}" "${dst_dir}/${name}"
+        fi
+    done
+    restore_shopt_state "${nullglob_state}"
+    restore_shopt_state "${dotglob_state}"
+}
+
+discover_blender_scripts_source() {
+    local config_root="${XDG_CONFIG_HOME:-${HOME}/.config}"
+    local candidate
+
+    if [[ -n "${BLENDER_USER_SCRIPTS:-}" && -d "${BLENDER_USER_SCRIPTS}" ]]; then
+        printf '%s\n' "${BLENDER_USER_SCRIPTS}"
+        return
+    fi
+
+    if [[ -n "${BLENDER_ADDONS:-}" && -d "${BLENDER_ADDONS}" ]]; then
+        dirname "${BLENDER_ADDONS}"
+        return
+    fi
+
+    for candidate in "${config_root}"/blender/*/scripts; do
+        if [[ -d "${candidate}/addons" || -d "${candidate}/addons_core" ]]; then
+            printf '%s\n' "${candidate}"
+            return
+        fi
+    done
+}
+
+discover_blender_extensions_source() {
+    local config_root="${XDG_CONFIG_HOME:-${HOME}/.config}"
+    local candidate
+
+    if [[ -n "${BLENDER_EXTENSIONS_USER:-}" && -d "${BLENDER_EXTENSIONS_USER}" ]]; then
+        printf '%s\n' "${BLENDER_EXTENSIONS_USER}"
+        return
+    fi
+
+    for candidate in "${config_root}"/blender/*/extensions/user_default; do
+        if [[ -d "${candidate}" ]]; then
+            printf '%s\n' "${candidate}"
+            return
+        fi
+    done
+}
+
+blender_version_from_extensions_dir() {
+    local ext_dir="$1"
+    local version_dir
+
+    version_dir="$(basename "$(dirname "$(dirname "${ext_dir}")")")"
+    if [[ -n "${version_dir}" ]]; then
+        printf '%s\n' "${version_dir}"
+    else
+        printf '4.2\n'
+    fi
+}
+
+inherit_blender_addons_into_runtime() {
+    local runtime_dir="$1"
+    local scripts_source
+    local extensions_source
+    local extensions_version
+
+    if [[ "${INHERIT_BLENDER_ADDONS}" != "1" ]]; then
+        return
+    fi
+
+    scripts_source="$(discover_blender_scripts_source || true)"
+    if [[ -n "${scripts_source}" ]]; then
+        link_directory_entries "${scripts_source}/addons" "${runtime_dir}/blender/scripts/addons"
+        link_directory_entries "${scripts_source}/addons_core" "${runtime_dir}/blender/scripts/addons_core"
+    fi
+
+    extensions_source="$(discover_blender_extensions_source || true)"
+    if [[ -n "${extensions_source}" ]]; then
+        extensions_version="$(blender_version_from_extensions_dir "${extensions_source}")"
+        link_directory_entries \
+            "${extensions_source}" \
+            "${runtime_dir}/xdg-config/blender/${extensions_version}/extensions/user_default"
+    fi
+}
+
 cleanup_runtime_dir() {
     local runtime_dir="$1"
     if [[ "${KEEP_RUNTIME}" == "1" || -z "${runtime_dir}" ]]; then
@@ -232,6 +347,7 @@ run_capture_command() {
 
     if [[ "${ISOLATE_RUNTIME}" == "1" ]]; then
         runtime_dir="$(prepare_runtime_dir "${slot}" "${scene_name}")"
+        inherit_blender_addons_into_runtime "${runtime_dir}"
         env_cmd+=(
             "TMPDIR=${runtime_dir}/tmp"
             "TMP=${runtime_dir}/tmp"
@@ -277,6 +393,9 @@ write_batch_config() {
         echo "DRY_RUN=${DRY_RUN}"
         echo "ISOLATE_RUNTIME=${ISOLATE_RUNTIME}"
         echo "KEEP_RUNTIME=${KEEP_RUNTIME}"
+        echo "INHERIT_BLENDER_ADDONS=${INHERIT_BLENDER_ADDONS}"
+        echo "BLENDER_USER_SCRIPTS_SOURCE=$(discover_blender_scripts_source || true)"
+        echo "BLENDER_EXTENSIONS_USER_SOURCE=$(discover_blender_extensions_source || true)"
         echo "CAPTURE_LOG_MODE=${CAPTURE_LOG_MODE:-compact}"
         echo "CAPTURE_LOG_LINES=${CAPTURE_LOG_LINES:-100}"
         echo "RUN_ID=${RUN_ID}"
@@ -425,6 +544,11 @@ echo "  Total CPUs: ${TOTAL_CPUS}"
 echo "  Skip completed: ${SKIP_COMPLETED}"
 echo "  Done marker: ${DONE_MARKER_REL}"
 echo "  Runtime isolation: ${ISOLATE_RUNTIME}"
+echo "  Inherit Blender addons: ${INHERIT_BLENDER_ADDONS}"
+if [[ "${INHERIT_BLENDER_ADDONS}" == "1" ]]; then
+    echo "  Blender scripts source: $(discover_blender_scripts_source || true)"
+    echo "  Blender extensions source: $(discover_blender_extensions_source || true)"
+fi
 echo "  Log mode: ${CAPTURE_LOG_MODE:-compact}"
 if [[ "${CAPTURE_LOG_MODE:-compact}" == "compact" ]]; then
     echo "  Log lines kept: first ${CAPTURE_LOG_LINES:-100} + last ${CAPTURE_LOG_LINES:-100}"

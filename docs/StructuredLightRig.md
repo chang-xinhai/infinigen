@@ -78,6 +78,13 @@ Recommended install command from the repository root:
 bash scripts/install/install_projectors_addon.sh
 ```
 
+When you rerun existing scenes through
+`scripts/launch/capture_existing_seed_scenes_parallel.sh` with the default
+`ISOLATE_RUNTIME=1`, the launcher now mirrors caller-visible Blender addons and
+extensions into each isolated worker runtime by default. If your addon lives in
+a nonstandard location, pass it explicitly through `BLENDER_USER_SCRIPTS`,
+`BLENDER_ADDONS`, or `BLENDER_EXTENSIONS_USER` before starting the batch.
+
 That install script now tries, in order:
 
 - an explicit `BLENDER_ADDONS=/path/to/.../scripts/addons`
