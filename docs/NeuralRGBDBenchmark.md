@@ -182,7 +182,7 @@ bash scripts/benchmark/neural_rgbd/run_neural_rgbd.sh \
     --task structured_light
 ```
 
-The benchmark passes the Neural RGB-D image width, image height, and focal-derived horizontal FOV into the existing `render_structured_light()` implementation so the structured-light run starts from the same imported benchmark trajectory and a matching RGB image geometry.
+The benchmark passes the imported Neural RGB-D trajectory and matching output frame geometry into the existing `render_structured_light()` implementation. The structured-light IR/projector rig geometry is intended to come from the configured Infinigen structured-light gin settings rather than from the Neural RGB-D RGB focal length. This keeps brightness and scene-lighting behavior aligned with the repository's normal structured-light pipeline while still allowing a benchmark-local projector FOV adjustment.
 
 Structured-light outputs go under:
 
@@ -215,6 +215,8 @@ bash scripts/benchmark/neural_rgbd/run_neural_rgbd.sh \
 ```
 
 Resolution and focal-matching parameters required for Neural RGB-D import are set explicitly by the benchmark code. Other structured-light settings may still be controlled through gin.
+
+By default, `run_all_neural_rgbd.sh` loads `structured_light_neural_rgbd.gin` in addition to the normal Infinigen structured-light configs. That benchmark-local file is intentionally narrow in scope and currently only widens the projector cone. Edit it when you want to tune Neural RGB-D projector coverage without changing the main Infinigen defaults.
 
 ## Notes And Current Assumptions
 
@@ -272,9 +274,12 @@ Structured-light defaults in the all-scene wrapper now follow the existing indoo
 
 - `structured_light.gin`
 - `full.gin`
+- `structured_light_neural_rgbd.gin`
 - `infinigen_examples/configs_indoor/capture_manifests/full.yaml`
 
-This is important for projector and pattern rendering. If you want a different capture profile, override:
+The benchmark-local `structured_light_neural_rgbd.gin` widens the projector cone, raises projector energy, and disables shared scene lighting during pattern captures so the projected pattern reaches the frame corners more reliably on Neural RGB-D scenes.
+
+If you want a different capture profile, override:
 
 - `STRUCTURED_LIGHT_SETTING`
 - `STRUCTURED_LIGHT_MANIFEST`

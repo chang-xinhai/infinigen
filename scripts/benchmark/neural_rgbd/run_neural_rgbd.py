@@ -29,7 +29,6 @@ from scripts.benchmark.neural_rgbd.common import (
     blender_pose_to_cv_camera,
     default_output_root,
     discover_scene_names,
-    focal_px_to_fov_deg,
     focal_px_to_lens_mm,
     frame_numbers,
     frame_to_image_index,
@@ -457,12 +456,6 @@ def run_structured_light_task(spec: SceneSpec, output_root: Path, args: argparse
     camera = _get_benchmark_camera()
     cam_placement.set_active_camera(camera)
 
-    sensor_height = CAMERA_SENSOR_HEIGHT_MM
-    sensor_width = sensor_height * metadata["image_width"] / metadata["image_height"]
-    fov_deg = focal_px_to_fov_deg(
-        focal_px=float(metadata["focal_px"]),
-        image_width=int(metadata["image_width"]),
-    )
     frame_index_offset = int(samples[0]["image_index"])
 
     sl_frames_dir = output_root / "sl_frames"
@@ -474,9 +467,6 @@ def run_structured_light_task(spec: SceneSpec, output_root: Path, args: argparse
         sl_resolution_y=int(metadata["image_height"]),
         sl_pattern_resolution_x=int(metadata["image_width"]),
         sl_pattern_resolution_y=int(metadata["image_height"]),
-        sl_cam_fov_deg=fov_deg,
-        sl_cam_sensor_width=sensor_width,
-        sl_cam_sensor_height=sensor_height,
         sl_frame_index_offset=frame_index_offset,
     )
     logger.info("Wrote Neural RGB-D structured-light outputs to %s", sl_frames_dir)

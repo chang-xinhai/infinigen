@@ -140,7 +140,7 @@ printf 'CUDA_VISIBLE_DEVICES=%s :: %s\\n' "${CUDA_VISIBLE_DEVICES:-}" "$*" >> "$
     assert "CUDA_VISIBLE_DEVICES=2,3 :: --scene_name breakfast_room --pose_source blender_poses --task trajectory" in invocation
     assert "CUDA_VISIBLE_DEVICES=2,3 :: --scene_name breakfast_room --pose_source blender_poses --task render" in invocation
     assert "CUDA_VISIBLE_DEVICES=2,3 :: --scene_name breakfast_room --pose_source blender_poses --task structured_light" in invocation
-    assert "-g structured_light.gin full.gin" in invocation
+    assert "-g structured_light.gin full.gin structured_light_neural_rgbd.gin" in invocation
     assert "render_structured_light.sl_capture_manifest_path=" in invocation
     assert "CUDA_VISIBLE_DEVICES=2,3 :: --scene_name whiteroom --pose_source blender_poses --task trajectory" in invocation
 

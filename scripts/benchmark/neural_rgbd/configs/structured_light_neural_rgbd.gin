@@ -1,0 +1,9 @@
+# Neural RGB-D benchmark structured-light tuning.
+#
+# These overrides are intentionally benchmark-local so the main Infinigen
+# structured-light defaults remain unchanged. Neural RGB-D scenes often have
+# different room scale and camera framing, so the projector usually needs a
+# slightly wider cone to keep the pattern visible across the whole frame.
+# Keep this file as the single benchmark-local tuning entry point.
+
+render_structured_light.sl_proj_fov_delta_deg = 10.0
