@@ -216,7 +216,24 @@ bash scripts/benchmark/neural_rgbd/run_neural_rgbd.sh \
 
 Resolution and focal-matching parameters required for Neural RGB-D import are set explicitly by the benchmark code. Other structured-light settings may still be controlled through gin.
 
-By default, `run_all_neural_rgbd.sh` loads `structured_light_neural_rgbd.gin` in addition to the normal Infinigen structured-light configs. That benchmark-local file is intentionally narrow in scope and currently only widens the projector cone. Edit it when you want to tune Neural RGB-D projector coverage without changing the main Infinigen defaults.
+By default, `run_all_neural_rgbd.sh` loads `structured_light_neural_rgbd.gin` in addition to the normal Infinigen structured-light configs. That benchmark-local file is intentionally narrow in scope and currently applies only two benchmark-local projector tweaks:
+
+- `render_structured_light.sl_proj_fov_delta_deg = 10.0`
+- `render_structured_light.sl_proj_energy = 1200.0`
+
+This keeps the background and scene-lighting behavior on the normal Infinigen path while making the pattern slightly wider and slightly brighter for Neural RGB-D scenes.
+
+Reference values:
+
+- main Infinigen indoor default `sl_proj_fov_delta_deg = -5.0`
+- main Infinigen indoor default `sl_proj_energy = 1000.0`
+- Neural RGB-D benchmark default `sl_proj_fov_delta_deg = 10.0`
+- Neural RGB-D benchmark default `sl_proj_energy = 1200.0`
+
+Recommended manual tuning for `sl_proj_energy`:
+
+- try `1300.0` first if the pattern is still just a little too dim
+- try `1100.0` if highlights start to wash out
 
 ## Notes And Current Assumptions
 
