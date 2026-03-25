@@ -1,0 +1,5 @@
+# Minimal Neural RGB-D benchmark gin base.
+#
+# This file intentionally stays small so benchmark-local CLI runs can opt into
+# specific existing configs such as infinigen_examples/configs_indoor/structured_light.gin
+# without pulling in the full indoor generation pipeline.
