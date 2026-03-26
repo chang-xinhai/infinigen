@@ -48,6 +48,8 @@ logger = logging.getLogger(__name__)
 RIG_NAME = "camrig.0"
 CAMERA_NAME = "camera_0_0"
 CAMERA_SENSOR_HEIGHT_MM = 18.0
+MISSING_TEXTURE_PLACEHOLDER_NAME = "neural_rgbd_missing_texture_placeholder"
+MISSING_TEXTURE_PLACEHOLDER_RGBA = (0.5, 0.5, 0.5, 1.0)
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -227,6 +229,94 @@ def _apply_scene_render_overrides(scene_name: str) -> None:
     links.new(background.outputs["Background"], output.inputs["Surface"])
 
 
+def _resolve_image_source_path(image: bpy.types.Image) -> Path | None:
+    filepath = image.filepath_raw or image.filepath
+    if not filepath:
+        return None
+    resolved = bpy.path.abspath(filepath, library=image.library)
+    if not resolved:
+        return None
+    return Path(resolved)
+
+
+def _image_has_packed_data(image: bpy.types.Image) -> bool:
+    if getattr(image, "packed_file", None) is not None:
+        return True
+    packed_files = getattr(image, "packed_files", None)
+    return packed_files is not None and len(packed_files) > 0
+
+
+def _get_missing_texture_placeholder() -> bpy.types.Image:
+    image = bpy.data.images.get(MISSING_TEXTURE_PLACEHOLDER_NAME)
+    if image is not None:
+        return image
+
+    image = bpy.data.images.new(
+        name=MISSING_TEXTURE_PLACEHOLDER_NAME,
+        width=1,
+        height=1,
+        alpha=True,
+    )
+    image.generated_color = MISSING_TEXTURE_PLACEHOLDER_RGBA
+    image.use_fake_user = True
+    return image
+
+
+def _sanitize_missing_texture_images() -> list[dict[str, str]]:
+    # Imported Neural RGB-D blend files often enable auto-pack while also
+    # referencing author-local texture paths. Disable auto-pack first so
+    # saving the imported trajectory does not fail on those missing files.
+    bpy.data.use_autopack = False
+
+    replacements = []
+    placeholder = None
+    for image in list(bpy.data.images):
+        if image.name == MISSING_TEXTURE_PLACEHOLDER_NAME:
+            continue
+        if image.source != "FILE" or _image_has_packed_data(image):
+            continue
+
+        source_path = _resolve_image_source_path(image)
+        if source_path is None or source_path.exists():
+            continue
+
+        image_name = image.name
+        if image.users == 0:
+            logger.warning("Removing unused missing image %s (%s)", image_name, source_path)
+            bpy.data.images.remove(image)
+            replacements.append({"image_name": image_name, "missing_path": str(source_path), "action": "removed"})
+            continue
+
+        if placeholder is None:
+            placeholder = _get_missing_texture_placeholder()
+
+        logger.warning(
+            "Replacing missing image %s (%s) with generated placeholder %s",
+            image_name,
+            source_path,
+            placeholder.name,
+        )
+        image.user_remap(placeholder)
+        bpy.data.images.remove(image)
+        replacements.append(
+            {"image_name": image_name, "missing_path": str(source_path), "action": f"remapped_to:{placeholder.name}"}
+        )
+
+    if replacements:
+        logger.warning("Applied missing-texture fallback to %d image datablock(s)", len(replacements))
+    return replacements
+
+
+def _save_mainfile_without_version_backups(filepath: Path) -> None:
+    filepaths_prefs = bpy.context.preferences.filepaths
+    original_save_version = int(filepaths_prefs.save_version)
+    try:
+        filepaths_prefs.save_version = 0
+        bpy.ops.wm.save_mainfile(filepath=str(filepath))
+    finally:
+        filepaths_prefs.save_version = original_save_version
+
+
 def run_trajectory_task(spec: SceneSpec, output_root: Path, args: argparse.Namespace) -> None:
     bpy.ops.wm.open_mainfile(filepath=str(spec.paths.scene_blend_path))
     scene = bpy.context.scene
@@ -237,6 +327,7 @@ def run_trajectory_task(spec: SceneSpec, output_root: Path, args: argparse.Names
     scene.frame_start = 1
     scene.frame_end = len(selected_frames)
     _apply_scene_render_overrides(spec.paths.scene_name)
+    _sanitize_missing_texture_images()
 
     rig, camera = _spawn_benchmark_camera(spec)
 
@@ -344,7 +435,7 @@ def run_trajectory_task(spec: SceneSpec, output_root: Path, args: argparse.Names
         "samples": samples,
     }
     metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
-    bpy.ops.wm.save_mainfile(filepath=str(trajectory_blend_path))
+    _save_mainfile_without_version_backups(trajectory_blend_path)
     logger.info("Wrote Neural RGB-D trajectory scene to %s", trajectory_blend_path)
 
 
@@ -365,6 +456,7 @@ def run_render_task(spec: SceneSpec, output_root: Path, args: argparse.Namespace
         )
     bpy.ops.wm.open_mainfile(filepath=str(trajectory_blend_path))
     _apply_scene_render_overrides(spec.paths.scene_name)
+    _sanitize_missing_texture_images()
 
     metadata = _load_trajectory_metadata(metadata_path)
     samples = _samples_for_frame_range(metadata["samples"], args.frame_start, args.frame_end)
@@ -442,6 +534,7 @@ def run_structured_light_task(spec: SceneSpec, output_root: Path, args: argparse
         )
     bpy.ops.wm.open_mainfile(filepath=str(trajectory_blend_path))
     _apply_scene_render_overrides(spec.paths.scene_name)
+    _sanitize_missing_texture_images()
 
     metadata = _load_trajectory_metadata(metadata_path)
     samples = _samples_for_frame_range(metadata["samples"], args.frame_start, args.frame_end)

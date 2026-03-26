@@ -4,6 +4,7 @@ import math
 import sys
 from pathlib import Path
 
+import bpy
 import numpy as np
 from PIL import Image
 
@@ -31,6 +32,10 @@ from scripts.benchmark.neural_rgbd.common import (
 )
 from scripts.benchmark.neural_rgbd.scene_calibrations import get_scene_calibration
 from scripts.benchmark.neural_rgbd.comparison import compare_rgb_pair, write_comparison_reports
+from scripts.benchmark.neural_rgbd.run_neural_rgbd import (
+    MISSING_TEXTURE_PLACEHOLDER_NAME,
+    _sanitize_missing_texture_images,
+)
 
 
 def test_parse_pose_file_reads_multiple_poses(tmp_path):
@@ -275,3 +280,42 @@ def test_compare_rgb_pair_and_write_reports(tmp_path):
     assert (tmp_path / "comparison" / "summary.json").exists()
     assert (tmp_path / "comparison" / "frames.jsonl").exists()
     assert (tmp_path / "comparison" / "frames.tsv").exists()
+
+
+def test_missing_texture_sanitizer_remaps_used_images_and_disables_autopack(tmp_path):
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    try:
+        missing_path = tmp_path / "missing_texture.jpg"
+        existing_path = tmp_path / "existing_texture.jpg"
+        existing_path.write_bytes(b"not_an_image_but_exists")
+
+        material = bpy.data.materials.new(name="TestMaterial")
+        material.use_nodes = True
+        node_tree = material.node_tree
+        missing_node = node_tree.nodes.new("ShaderNodeTexImage")
+        existing_node = node_tree.nodes.new("ShaderNodeTexImage")
+
+        missing_image = bpy.data.images.new(name="MissingImage", width=1, height=1, alpha=True)
+        missing_image.source = "FILE"
+        missing_image.filepath = str(missing_path)
+        missing_node.image = missing_image
+
+        existing_image = bpy.data.images.new(name="ExistingImage", width=1, height=1, alpha=True)
+        existing_image.source = "FILE"
+        existing_image.filepath = str(existing_path)
+        existing_node.image = existing_image
+
+        bpy.data.use_autopack = True
+
+        replacements = _sanitize_missing_texture_images()
+
+        assert bpy.data.use_autopack is False
+        assert len(replacements) == 1
+        assert replacements[0]["image_name"] == "MissingImage"
+        assert replacements[0]["missing_path"] == str(missing_path)
+        assert replacements[0]["action"] == f"remapped_to:{MISSING_TEXTURE_PLACEHOLDER_NAME}"
+        assert missing_node.image is bpy.data.images[MISSING_TEXTURE_PLACEHOLDER_NAME]
+        assert existing_node.image is existing_image
+        assert bpy.data.images.get("MissingImage") is None
+    finally:
+        bpy.ops.wm.read_factory_settings(use_empty=True)
