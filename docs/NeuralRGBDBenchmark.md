@@ -77,6 +77,8 @@ Important behavior:
 - bypasses benchmark-local scene calibration when `--pose_source blender_poses` is used
 - creates a single benchmark camera rig named `camrig.0`
 - creates an active camera named `camera_0_0`
+- disables Blender auto-pack for the imported benchmark scene before saving the trajectory copy
+- replaces missing external `bpy.data.images` entries with a generated placeholder so owner-local texture paths do not break trajectory export
 - writes `trajectory/scene.blend`
 - writes `trajectory/trajectory_metadata.json`
 
@@ -285,7 +287,10 @@ outputs/benchmark/neural_rgbd/logs/run_all_summary.tsv
 GPU selection:
 
 - `GPU_IDS=2` restricts the benchmark to one GPU
-- `GPU_IDS=2,3` forwards `CUDA_VISIBLE_DEVICES=2,3` into each per-scene task run
+- `GPU_IDS=2,3` launches two parallel workers, one pinned to GPU `2` and one pinned to GPU `3`
+- `MAX_PARALLEL_SCENES=1` throttles the worker count below the number of visible GPUs when needed
+- `ISOLATE_RUNTIME=1` is the default and gives each worker-scene run its own `TMPDIR`, `XDG_*`, and `BLENDER_USER_*` runtime directories to avoid concurrent Blender state collisions
+- `KEEP_RUNTIME=1` keeps those per-scene runtime directories on disk for debugging failed runs
 
 Structured-light defaults in the all-scene wrapper now follow the existing indoor capture pipeline more closely:
 
@@ -294,7 +299,7 @@ Structured-light defaults in the all-scene wrapper now follow the existing indoo
 - `structured_light_neural_rgbd.gin`
 - `infinigen_examples/configs_indoor/capture_manifests/full.yaml`
 
-The benchmark-local `structured_light_neural_rgbd.gin` widens the projector cone, raises projector energy, and disables shared scene lighting during pattern captures so the projected pattern reaches the frame corners more reliably on Neural RGB-D scenes.
+The benchmark-local `structured_light_neural_rgbd.gin` keeps the background lighting on the normal Infinigen path and only applies small projector-specific adjustments for Neural RGB-D scenes.
 
 If you want a different capture profile, override:
 

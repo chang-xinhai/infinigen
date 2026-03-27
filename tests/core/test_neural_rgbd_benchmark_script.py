@@ -109,7 +109,13 @@ def test_run_all_neural_rgbd_wrapper_invokes_runner_per_scene_and_writes_summary
     fake_runner.write_text(
         """#!/usr/bin/env bash
 set -euo pipefail
-printf 'CUDA_VISIBLE_DEVICES=%s :: %s\\n' "${CUDA_VISIBLE_DEVICES:-}" "$*" >> "$INVOCATION_LOG"
+sleep 0.05
+printf 'CUDA_VISIBLE_DEVICES=%s TMPDIR=%s XDG_CONFIG_HOME=%s BLENDER_USER_CONFIG=%s :: %s\\n' \
+  "${CUDA_VISIBLE_DEVICES:-}" \
+  "${TMPDIR:-}" \
+  "${XDG_CONFIG_HOME:-}" \
+  "${BLENDER_USER_CONFIG:-}" \
+  "$*" >> "$INVOCATION_LOG"
 """,
         encoding="utf-8",
     )
@@ -136,13 +142,32 @@ printf 'CUDA_VISIBLE_DEVICES=%s :: %s\\n' "${CUDA_VISIBLE_DEVICES:-}" "$*" >> "$
     )
 
     assert result.returncode == 0, result.stderr
-    invocation = invocation_log.read_text(encoding="utf-8")
-    assert "CUDA_VISIBLE_DEVICES=2,3 :: --scene_name breakfast_room --pose_source blender_poses --task trajectory" in invocation
-    assert "CUDA_VISIBLE_DEVICES=2,3 :: --scene_name breakfast_room --pose_source blender_poses --task render" in invocation
-    assert "CUDA_VISIBLE_DEVICES=2,3 :: --scene_name breakfast_room --pose_source blender_poses --task structured_light" in invocation
-    assert "-g structured_light.gin full.gin structured_light_neural_rgbd.gin" in invocation
-    assert "render_structured_light.sl_capture_manifest_path=" in invocation
-    assert "CUDA_VISIBLE_DEVICES=2,3 :: --scene_name whiteroom --pose_source blender_poses --task trajectory" in invocation
+    invocation_lines = invocation_log.read_text(encoding="utf-8").splitlines()
+    assert invocation_lines
+    assert all("CUDA_VISIBLE_DEVICES=2,3 ::" not in line for line in invocation_lines)
+    used_gpu_ids = {
+        line.split("CUDA_VISIBLE_DEVICES=", 1)[1].split(" ", 1)[0]
+        for line in invocation_lines
+    }
+    assert used_gpu_ids == {"2", "3"}
+    assert all("TMPDIR=" in line for line in invocation_lines)
+    assert all("XDG_CONFIG_HOME=" in line for line in invocation_lines)
+    assert all("BLENDER_USER_CONFIG=" in line for line in invocation_lines)
+    assert all("/tmp/" in line or str(tmp_path) in line for line in invocation_lines)
+
+    expected_fragments = [
+        "--scene_name breakfast_room --pose_source blender_poses --task trajectory",
+        "--scene_name breakfast_room --pose_source blender_poses --task render",
+        "--scene_name breakfast_room --pose_source blender_poses --task structured_light",
+        "--scene_name whiteroom --pose_source blender_poses --task trajectory",
+        "--scene_name whiteroom --pose_source blender_poses --task render",
+        "--scene_name whiteroom --pose_source blender_poses --task structured_light",
+    ]
+    for fragment in expected_fragments:
+        assert any(fragment in line for line in invocation_lines)
+
+    assert any("-g structured_light.gin full.gin structured_light_neural_rgbd.gin" in line for line in invocation_lines)
+    assert any("render_structured_light.sl_capture_manifest_path=" in line for line in invocation_lines)
 
     summary = (output_root / "logs" / "run_all_summary.tsv").read_text(encoding="utf-8")
     assert "breakfast_room\tsuccess" in summary
