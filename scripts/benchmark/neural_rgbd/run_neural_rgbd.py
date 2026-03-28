@@ -29,6 +29,7 @@ from scripts.benchmark.neural_rgbd.common import (
     blender_pose_to_cv_camera,
     default_output_root,
     discover_scene_names,
+    estimate_blender_pose_metric_scale,
     focal_px_to_lens_mm,
     frame_numbers,
     frame_to_image_index,
@@ -119,6 +120,20 @@ def _frame_numbers_for_spec(spec: SceneSpec, args: argparse.Namespace) -> list[i
     )
 
 
+def _metric_output_scale_for_spec(spec: SceneSpec) -> float:
+    if spec.pose_format == "blender":
+        return estimate_blender_pose_metric_scale(
+            dataset_root=spec.paths.dataset_root,
+            scene_name=spec.paths.scene_name,
+        )
+
+    calibration = get_scene_calibration(spec.paths.scene_name)
+    scale = float(calibration.scale)
+    if scale <= 0.0:
+        raise ValueError(f"Scene calibration scale must be positive, got {scale} for {spec.paths.scene_name}")
+    return 1.0 / scale
+
+
 def _ensure_benchmark_camera_names_available() -> None:
     conflicts = [name for name in (RIG_NAME, CAMERA_NAME) if name in bpy.data.objects]
     if conflicts:
@@ -131,8 +146,7 @@ def _ensure_benchmark_camera_names_available() -> None:
 def _spawn_benchmark_camera(spec: SceneSpec):
     _ensure_benchmark_camera_names_available()
     scene = bpy.context.scene
-    scene.render.resolution_x = spec.image_width
-    scene.render.resolution_y = spec.image_height
+    _set_scene_render_resolution(scene, spec.image_width, spec.image_height)
 
     rig_collection = butil.get_collection("camera_rigs")
     camera_collection = butil.get_collection("cameras")
@@ -166,6 +180,16 @@ def _set_linear_keyframe_interpolation(obj: bpy.types.Object) -> None:
     for fcurve in obj.animation_data.action.fcurves:
         for keyframe_point in fcurve.keyframe_points:
             keyframe_point.interpolation = "LINEAR"
+
+
+def _set_scene_render_resolution(
+    scene: bpy.types.Scene,
+    width: int,
+    height: int,
+) -> None:
+    scene.render.resolution_x = int(width)
+    scene.render.resolution_y = int(height)
+    scene.render.resolution_percentage = 100
 
 
 def _trajectory_output_paths(output_root: Path) -> tuple[Path, Path]:
@@ -322,6 +346,7 @@ def run_trajectory_task(spec: SceneSpec, output_root: Path, args: argparse.Names
     scene = bpy.context.scene
     selected_frames = _frame_numbers_for_spec(spec, args)
     calibration = get_scene_calibration(spec.paths.scene_name) if spec.pose_format == "opengl" else None
+    metric_output_scale = _metric_output_scale_for_spec(spec)
 
     scene.render.fps = int(args.fps)
     scene.frame_start = 1
@@ -389,6 +414,7 @@ def run_trajectory_task(spec: SceneSpec, output_root: Path, args: argparse.Names
         "camera_name": CAMERA_NAME,
         "camera_rig_name": RIG_NAME,
         "pose_format": spec.pose_format,
+        "metric_output_scale": float(metric_output_scale),
         "scene_calibration": (
             {
                 "description": calibration.description,
@@ -431,6 +457,7 @@ def run_trajectory_task(spec: SceneSpec, output_root: Path, args: argparse.Names
                 else "camera_to_world_blender = scene_calibration(scene_name, camera_to_world_opengl)"
             ),
             "camview_export_conversion": "camera_to_world_cv = camera_to_world_blender @ diag(1, -1, -1, 1)",
+            "structured_light_depth_export": "camera-space +Z depth in metric scene units with invalid/background pixels set to 0",
         },
         "samples": samples,
     }
@@ -464,8 +491,7 @@ def run_render_task(spec: SceneSpec, output_root: Path, args: argparse.Namespace
         raise ValueError("Selected frame range produced no Neural RGB-D render samples")
 
     scene = bpy.context.scene
-    scene.render.resolution_x = int(metadata["image_width"])
-    scene.render.resolution_y = int(metadata["image_height"])
+    _set_scene_render_resolution(scene, metadata["image_width"], metadata["image_height"])
     _ensure_view_layer_name(scene)
     scene.render.image_settings.file_format = "PNG"
     scene.render.image_settings.color_mode = "RGB"
@@ -542,6 +568,7 @@ def run_structured_light_task(spec: SceneSpec, output_root: Path, args: argparse
         raise ValueError("Selected frame range produced no Neural RGB-D structured-light samples")
 
     scene = bpy.context.scene
+    _set_scene_render_resolution(scene, metadata["image_width"], metadata["image_height"])
     scene.frame_start = int(samples[0]["frame"])
     scene.frame_end = int(samples[-1]["frame"])
     _ensure_view_layer_name(scene)
@@ -550,6 +577,7 @@ def run_structured_light_task(spec: SceneSpec, output_root: Path, args: argparse
     cam_placement.set_active_camera(camera)
 
     frame_index_offset = int(samples[0]["image_index"])
+    metric_output_scale = float(metadata.get("metric_output_scale", _metric_output_scale_for_spec(spec)))
 
     sl_frames_dir = output_root / "sl_frames"
     sl_frames_dir.mkdir(parents=True, exist_ok=True)
@@ -561,6 +589,7 @@ def run_structured_light_task(spec: SceneSpec, output_root: Path, args: argparse
         sl_pattern_resolution_x=int(metadata["image_width"]),
         sl_pattern_resolution_y=int(metadata["image_height"]),
         sl_frame_index_offset=frame_index_offset,
+        sl_world_unit_scale=metric_output_scale,
     )
     logger.info("Wrote Neural RGB-D structured-light outputs to %s", sl_frames_dir)
 

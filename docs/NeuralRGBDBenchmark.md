@@ -186,6 +186,12 @@ bash scripts/benchmark/neural_rgbd/run_neural_rgbd.sh \
 
 The benchmark passes the imported Neural RGB-D trajectory and matching output frame geometry into the existing `render_structured_light()` implementation. The structured-light IR/projector rig geometry is intended to come from the configured Infinigen structured-light gin settings rather than from the Neural RGB-D RGB focal length. This keeps brightness and scene-lighting behavior aligned with the repository's normal structured-light pipeline while still allowing a benchmark-local projector FOV adjustment.
 
+Depth export behavior for this benchmark is now explicitly metric-oriented:
+
+- structured-light RGB depth EXRs are written as camera-space `+Z` depth, not raw Blender ray distance
+- invalid / background depth pixels are written as `0` instead of Blender's large sentinel values
+- when `--pose_source blender_poses` is used, the benchmark estimates a per-scene metric output scale from the matching `poses.txt` trajectory and applies that scale during structured-light export
+
 Structured-light outputs go under:
 
 ```text
@@ -218,12 +224,16 @@ bash scripts/benchmark/neural_rgbd/run_neural_rgbd.sh \
 
 Resolution and focal-matching parameters required for Neural RGB-D import are set explicitly by the benchmark code. Other structured-light settings may still be controlled through gin.
 
-By default, `run_all_neural_rgbd.sh` loads `structured_light_neural_rgbd.gin` in addition to the normal Infinigen structured-light configs. That benchmark-local file is intentionally narrow in scope and currently applies only two benchmark-local projector tweaks:
+The benchmark also forces Blender `scene.render.resolution_percentage = 100` during trajectory import, RGB rerender, and structured-light capture so owner-local or source-scene preview scale settings do not silently shrink outputs below the dataset resolution.
 
+By default, `run_all_neural_rgbd.sh` loads `structured_light_neural_rgbd.gin` in addition to the normal Infinigen structured-light configs. That benchmark-local file is intentionally narrow in scope and currently applies four benchmark-local rig/projector tweaks:
+
+- `render_structured_light.sl_baseline = 0.2`
+- `render_structured_light.sl_rgb_offset_scale = -0.5`
 - `render_structured_light.sl_proj_fov_delta_deg = 10.0`
 - `render_structured_light.sl_proj_energy = 1200.0`
 
-This keeps the background and scene-lighting behavior on the normal Infinigen path while making the pattern slightly wider and slightly brighter for Neural RGB-D scenes.
+This keeps the background and scene-lighting behavior on the normal Infinigen path while making the structured-light stereo baseline 20 cm, forcing RGB to overlap the left IR camera exactly, and making the pattern slightly wider and slightly brighter for Neural RGB-D scenes.
 
 Reference values:
 
@@ -247,6 +257,7 @@ Recommended manual tuning for `sl_proj_energy`:
 - the default world mapping first converts OpenGL-world Y-up coordinates into Blender-world Z-up coordinates
 - `breakfast_room` currently uses an additional validated scene calibration and minimal scene override to correct scene-scale mismatch and obvious lighting/background mismatches
 - `blender_poses` bypasses that scene calibration because the matrices are consumed as Blender-world camera-to-world poses
+- structured-light export still applies a benchmark-local metric output scale for `blender_poses`, derived from the paired `poses.txt` trajectory, so RGB reproduction can stay on the Blender archive path without leaving depth in arbitrary Blender scene units
 - the imported benchmark camera uses the repository camera naming convention so existing camera-parameter exporters and preview scripts can be reused
 - this workflow does not modify the main Infinigen structured-light core file
 
@@ -267,6 +278,7 @@ bash scripts/benchmark/neural_rgbd/run_all_neural_rgbd.sh
 Useful overrides:
 
 - `SCENES="breakfast_room whiteroom"` limits the run to selected scenes
+- by default, the wrapper excludes `full_kitchen`, `morning_apartment`, and `whiteroom`; in this checkout `full_kitchen` maps to the local scene directory `complete_kitchen`, so the default all-scene run processes exactly 6 scenes
 - `TASKS="trajectory structured_light"` skips the standalone RGB comparison stage
 - `FRAME_END=8` runs a short validation subset per scene
 - `OUTPUT_ROOT=/tmp/neural_rgbd_full` changes the benchmark output root
@@ -299,7 +311,7 @@ Structured-light defaults in the all-scene wrapper now follow the existing indoo
 - `structured_light_neural_rgbd.gin`
 - `infinigen_examples/configs_indoor/capture_manifests/full.yaml`
 
-The benchmark-local `structured_light_neural_rgbd.gin` keeps the background lighting on the normal Infinigen path and only applies small projector-specific adjustments for Neural RGB-D scenes.
+The benchmark-local `structured_light_neural_rgbd.gin` keeps the background lighting on the normal Infinigen path while also forcing the Neural RGB-D structured-light rig to use a 20 cm stereo baseline with RGB and `l_cam` perfectly overlapping.
 
 If you want a different capture profile, override:
 

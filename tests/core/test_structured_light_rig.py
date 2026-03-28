@@ -7,6 +7,7 @@ from pathlib import Path
 
 import infinigen
 import infinigen.core.rendering.structured_light as structured_light
+from infinigen.core.rendering.post_render import ray_distance_to_z_depth, sanitize_depth
 from infinigen.core.rendering.structured_light import (
     StructuredLightRig,
     _append_incremental_calibration_frame,
@@ -23,6 +24,7 @@ from infinigen.core.rendering.structured_light import (
     _rewrite_incremental_calibration,
     _restore_pattern_capture_lighting,
     _resolve_pattern_paths,
+    _set_scene_render_resolution,
 )
 
 
@@ -40,6 +42,28 @@ def test_structured_light_rig_offsets_rgb_left_of_left_ir():
     assert np.isclose(rig.proj_obj.location.x, 0.0)
     assert np.isclose(rig.rgb_cam.location.x, baseline * rgb_offset_scale)
     assert rig.rgb_cam.location.x < rig.left_cam.location.x < rig.proj_obj.location.x
+
+
+def test_structured_light_rig_can_overlap_rgb_with_left_ir():
+    baseline = 0.2
+    rig = StructuredLightRig(baseline=baseline, rgb_offset_scale=-0.5)
+    rig.build()
+
+    assert np.isclose(rig.left_cam.location.x, -baseline / 2)
+    assert np.isclose(rig.rgb_cam.location.x, rig.left_cam.location.x)
+    assert np.isclose(rig.right_cam.location.x, baseline / 2)
+
+    scene = bpy.data.scenes["Scene"]
+    scene.render.resolution_x = rig.resolution_x
+    scene.render.resolution_y = rig.resolution_y
+    parameters = rig.build_calibration_dict(
+        frame_ids=[1],
+        extrinsics=[{"L": np.eye(4).tolist(), "R": np.eye(4).tolist(), "RGB": np.eye(4).tolist()}],
+        patterns=["white"],
+        manifest_setting="full",
+    )
+
+    assert np.allclose(parameters["rel_T"]["RGB"], parameters["rel_T"]["L"])
 
 
 def test_structured_light_calibration_payload_includes_rgb_relative_calibration():
@@ -75,6 +99,19 @@ def test_structured_light_calibration_payload_includes_rgb_relative_calibration(
     assert parameters["frame_ids"] == [1]
     assert parameters["patterns"] == ["D415", "white"]
     assert parameters["extrinsic"] == extrinsics
+
+
+def test_structured_light_render_resolution_helper_forces_full_scale():
+    scene = bpy.data.scenes["Scene"]
+    scene.render.resolution_x = 1920
+    scene.render.resolution_y = 1080
+    scene.render.resolution_percentage = 50
+
+    _set_scene_render_resolution(scene, 640, 480)
+
+    assert scene.render.resolution_x == 640
+    assert scene.render.resolution_y == 480
+    assert scene.render.resolution_percentage == 100
 
 
 def test_structured_light_default_patterns_resolve_from_repo_assets():
@@ -221,6 +258,25 @@ def test_shared_baseline_env_strength_uses_preview_floor_when_forced():
         preview_force_lighting=False,
         preview_world_strength=0.5,
     ) == 0.1
+
+
+def test_sanitize_depth_zeros_background_sentinels_and_invalid_values():
+    depth = np.array([[1.5, 1e10], [np.inf, -3.0]], dtype=np.float32)
+
+    sanitized = sanitize_depth(depth)
+
+    np.testing.assert_allclose(sanitized, np.array([[1.5, 0.0], [0.0, 0.0]], dtype=np.float32))
+
+
+def test_ray_distance_to_z_depth_reduces_off_axis_distances():
+    depth = np.array([[2.0, 2.0]], dtype=np.float32)
+    intrinsic = np.array([[2.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 1.0]], dtype=np.float32)
+
+    z_depth = ray_distance_to_z_depth(depth, intrinsic)
+
+    assert np.isclose(z_depth[0, 0], 2.0)
+    assert z_depth[0, 1] < 2.0
+    assert np.isclose(z_depth[0, 1], 2.0 / np.sqrt(1.25))
 
 
 def test_shared_capture_cycles_resets_to_base_then_applies_preview_overrides(monkeypatch):

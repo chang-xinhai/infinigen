@@ -53,6 +53,54 @@ def load_depth(p):
     return load_single_channel(p)
 
 
+def sanitize_depth(
+    depth: np.ndarray,
+    *,
+    invalid_depth_threshold: float = 1e9,
+) -> np.ndarray:
+    depth = np.asarray(depth, dtype=np.float32).copy()
+    invalid = (~np.isfinite(depth)) | (depth <= 0.0) | (depth >= float(invalid_depth_threshold))
+    depth[invalid] = 0.0
+    return depth
+
+
+def ray_distance_to_z_depth(
+    depth: np.ndarray,
+    intrinsic: np.ndarray,
+) -> np.ndarray:
+    depth = np.asarray(depth, dtype=np.float32)
+    intrinsic = np.asarray(intrinsic, dtype=np.float32)
+    if depth.ndim != 2:
+        raise ValueError(f"Expected a 2D depth array, got shape {depth.shape}")
+    if intrinsic.shape != (3, 3):
+        raise ValueError(f"Expected a 3x3 intrinsic matrix, got shape {intrinsic.shape}")
+
+    fx = float(intrinsic[0, 0])
+    fy = float(intrinsic[1, 1])
+    cx = float(intrinsic[0, 2])
+    cy = float(intrinsic[1, 2])
+    if fx <= 0.0 or fy <= 0.0:
+        raise ValueError(f"Invalid focal lengths in intrinsic matrix: fx={fx}, fy={fy}")
+
+    height, width = depth.shape
+    grid_x, grid_y = np.meshgrid(
+        np.arange(width, dtype=np.float32),
+        np.arange(height, dtype=np.float32),
+    )
+    ray_norm = np.sqrt(((grid_x - cx) / fx) ** 2 + ((grid_y - cy) / fy) ** 2 + 1.0)
+    z_depth = depth / ray_norm
+    z_depth[depth <= 0.0] = 0.0
+    return z_depth.astype(np.float32, copy=False)
+
+
+def write_depth_exr(path: Path, depth: np.ndarray) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    depth = np.ascontiguousarray(np.asarray(depth, dtype=np.float32))
+    if not cv2.imwrite(str(path), depth):
+        raise IOError(f"Failed to write EXR depth image to {path}")
+
+
 def load_normals(path, camera=None) -> np.ndarray:
     data = load_exr(path)
     if camera is not None:

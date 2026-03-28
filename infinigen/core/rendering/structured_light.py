@@ -36,11 +36,15 @@ from infinigen.core.rendering.post_render import (
     colorize_normals,
     load_depth,
     load_normals,
+    ray_distance_to_z_depth,
+    sanitize_depth,
+    write_depth_exr,
 )
 from infinigen.core.rendering.render import (
     _configure_preview_cycles,
     _ensure_preview_lighting,
 )
+from infinigen.core.util import camera as cam_util
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +146,12 @@ def _rewrite_incremental_calibration(progress_path, header, frame_records):
 
 def _create_render_temp_dir():
     return Path(tempfile.mkdtemp(prefix="sl_render_"))
+
+
+def _set_scene_render_resolution(scene, width, height):
+    scene.render.resolution_x = int(width)
+    scene.render.resolution_y = int(height)
+    scene.render.resolution_percentage = 100
 
 
 def _append_incremental_calibration_frame(progress_path, frame_id, extrinsic):
@@ -756,6 +766,18 @@ def _record_requested_extrinsics(rig, manifest):
     return extrinsic
 
 
+def _scale_extrinsic_translations(extrinsic, world_unit_scale):
+    if np.isclose(world_unit_scale, 1.0):
+        return extrinsic
+
+    scaled = {}
+    for camera_key, matrix in extrinsic.items():
+        matrix_np = np.asarray(matrix, dtype=np.float64).copy()
+        matrix_np[:3, 3] *= float(world_unit_scale)
+        scaled[camera_key] = matrix_np.tolist()
+    return scaled
+
+
 def _capture_cycles_state(scene):
     cycles = scene.cycles
     return {
@@ -887,6 +909,7 @@ def render_structured_light(
     sl_resume=False,
     sl_resume_from_frame=None,
     sl_frame_index_offset=0,
+    sl_world_unit_scale=1.0,
 ):
     tic = time.time()
 
@@ -935,8 +958,7 @@ def render_structured_light(
     scene.cycles.device = "GPU"
     scene.cycles.samples = sl_max_samples
     scene.render.use_persistent_data = True
-    scene.render.resolution_x = sl_resolution_x
-    scene.render.resolution_y = sl_resolution_y
+    _set_scene_render_resolution(scene, sl_resolution_x, sl_resolution_y)
 
     orig_env_strength = rig.set_env_strength(0)
     rig.set_env_strength(orig_env_strength)
@@ -1025,7 +1047,10 @@ def render_structured_light(
                 camera.matrix_world.to_3x3(),
             )
 
-        frame_extrinsic = _record_requested_extrinsics(rig, manifest)
+        frame_extrinsic = _scale_extrinsic_translations(
+            _record_requested_extrinsics(rig, manifest),
+            sl_world_unit_scale,
+        )
         frame_complete = _frame_outputs_complete(
             output_root=output_root,
             manifest=manifest,
@@ -1071,6 +1096,7 @@ def render_structured_light(
                 frame_tag=frame_tag,
                 path_plan=rgb_plan,
                 exr_depth=sl_exr_depth,
+                world_unit_scale=sl_world_unit_scale,
             )
 
         if want_pattern_images and pattern_specs:
@@ -1107,6 +1133,7 @@ def render_structured_light(
                             frame_tag=frame_tag,
                             path_plan=plan,
                             exr_depth=sl_exr_depth,
+                            world_unit_scale=sl_world_unit_scale,
                         )
             _restore_pattern_capture_lighting(
                 rig,
@@ -1150,6 +1177,7 @@ def _render_single(
     frame_tag,
     path_plan,
     exr_depth=16,
+    world_unit_scale=1.0,
 ):
     scene.camera = camera_obj
     scene.use_nodes = True
@@ -1239,13 +1267,21 @@ def _render_single(
             _move_render_output(image_png_path, image_png_target)
 
         if need_depth:
+            intrinsic = np.asarray(
+                cam_util.get_calibration_matrix_K_from_blender(camera_obj.data),
+                dtype=np.float32,
+            )
+            depth_array = sanitize_depth(load_depth(depth_exr_path))
+            depth_array = ray_distance_to_z_depth(depth_array, intrinsic)
+            if not np.isclose(world_unit_scale, 1.0):
+                depth_array = depth_array * float(world_unit_scale)
             if depth_exr_target:
-                _move_render_output(depth_exr_path, depth_exr_target)
-            depth_source = depth_exr_target or depth_exr_path
+                _ensure_parent(depth_exr_target)
+                write_depth_exr(depth_exr_target, depth_array)
             if depth_png_target:
                 _ensure_parent(depth_png_target)
-                imwrite(depth_png_target, colorize_depth(load_depth(depth_source)))
-            if depth_exr_target is None and depth_exr_path is not None and depth_exr_path.exists():
+                imwrite(depth_png_target, colorize_depth(depth_array))
+            if depth_exr_path is not None and depth_exr_path.exists():
                 depth_exr_path.unlink()
 
         if need_normal:

@@ -333,3 +333,56 @@ def focal_px_to_lens_mm(
     sensor_width_mm: float,
 ) -> float:
     return float(focal_px) * float(sensor_width_mm) / float(image_width)
+
+
+def estimate_metric_scale_from_pose_sequences(
+    metric_poses: np.ndarray,
+    blender_poses: np.ndarray,
+) -> float:
+    metric_poses = np.asarray(metric_poses, dtype=np.float64)
+    blender_poses = np.asarray(blender_poses, dtype=np.float64)
+    if metric_poses.shape != blender_poses.shape:
+        raise ValueError(
+            f"Metric and Blender pose arrays must have the same shape, got {metric_poses.shape} and {blender_poses.shape}"
+        )
+    if metric_poses.ndim != 3 or metric_poses.shape[1:] != (4, 4):
+        raise ValueError(f"Expected pose arrays of shape (N, 4, 4), got {metric_poses.shape}")
+
+    metric_centers = metric_poses[:, :3, 3]
+    blender_centers = blender_poses[:, :3, 3]
+
+    metric_steps = np.linalg.norm(np.diff(metric_centers, axis=0), axis=1)
+    blender_steps = np.linalg.norm(np.diff(blender_centers, axis=0), axis=1)
+    valid_steps = (metric_steps > 1e-8) & (blender_steps > 1e-8)
+    if np.any(valid_steps):
+        return float(np.median(metric_steps[valid_steps] / blender_steps[valid_steps]))
+
+    metric_centered = metric_centers - metric_centers.mean(axis=0, keepdims=True)
+    blender_centered = blender_centers - blender_centers.mean(axis=0, keepdims=True)
+    metric_radii = np.linalg.norm(metric_centered, axis=1)
+    blender_radii = np.linalg.norm(blender_centered, axis=1)
+    valid_radii = (metric_radii > 1e-8) & (blender_radii > 1e-8)
+    if np.any(valid_radii):
+        return float(np.median(metric_radii[valid_radii] / blender_radii[valid_radii]))
+
+    return 1.0
+
+
+def estimate_blender_pose_metric_scale(
+    dataset_root: Path,
+    scene_name: str,
+) -> float:
+    metric_spec = load_scene_spec(
+        dataset_root=dataset_root,
+        scene_name=scene_name,
+        pose_source=POSE_SOURCE_OPENGL,
+    )
+    blender_spec = load_scene_spec(
+        dataset_root=dataset_root,
+        scene_name=scene_name,
+        pose_source=POSE_SOURCE_BLENDER,
+    )
+    return estimate_metric_scale_from_pose_sequences(
+        metric_poses=metric_spec.poses_cv,
+        blender_poses=blender_spec.poses_cv,
+    )

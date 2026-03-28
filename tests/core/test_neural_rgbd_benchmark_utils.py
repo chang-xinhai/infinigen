@@ -19,6 +19,7 @@ from scripts.benchmark.neural_rgbd.common import (
     cv_camera_to_blender_pose,
     default_output_root,
     discover_scene_names,
+    estimate_metric_scale_from_pose_sequences,
     focal_px_to_fov_deg,
     frame_numbers,
     frame_to_image_index,
@@ -34,6 +35,7 @@ from scripts.benchmark.neural_rgbd.scene_calibrations import get_scene_calibrati
 from scripts.benchmark.neural_rgbd.comparison import compare_rgb_pair, write_comparison_reports
 from scripts.benchmark.neural_rgbd.run_neural_rgbd import (
     MISSING_TEXTURE_PLACEHOLDER_NAME,
+    _set_scene_render_resolution,
     _sanitize_missing_texture_images,
 )
 
@@ -255,6 +257,18 @@ def test_focal_px_to_fov_deg_matches_expected_geometry():
     assert math.isclose(fov, 60.0, rel_tol=1e-9)
 
 
+def test_estimate_metric_scale_from_pose_sequences_recovers_blender_to_metric_scalar():
+    metric = np.repeat(np.eye(4, dtype=np.float64)[None, ...], 3, axis=0)
+    blender = np.repeat(np.eye(4, dtype=np.float64)[None, ...], 3, axis=0)
+
+    metric[:, 0, 3] = [0.0, 1.0, 2.0]
+    blender[:, 0, 3] = [0.0, 4.0, 8.0]
+
+    scale = estimate_metric_scale_from_pose_sequences(metric_poses=metric, blender_poses=blender)
+
+    assert math.isclose(scale, 0.25, rel_tol=1e-9)
+
+
 def test_compare_rgb_pair_and_write_reports(tmp_path):
     reference_path = tmp_path / "reference.png"
     rendered_path = tmp_path / "rendered.png"
@@ -319,3 +333,16 @@ def test_missing_texture_sanitizer_remaps_used_images_and_disables_autopack(tmp_
         assert bpy.data.images.get("MissingImage") is None
     finally:
         bpy.ops.wm.read_factory_settings(use_empty=True)
+
+
+def test_set_scene_render_resolution_forces_full_scale():
+    scene = bpy.context.scene
+    scene.render.resolution_x = 1920
+    scene.render.resolution_y = 1080
+    scene.render.resolution_percentage = 65
+
+    _set_scene_render_resolution(scene, 640, 480)
+
+    assert scene.render.resolution_x == 640
+    assert scene.render.resolution_y == 480
+    assert scene.render.resolution_percentage == 100
