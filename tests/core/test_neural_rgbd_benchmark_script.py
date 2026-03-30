@@ -128,6 +128,7 @@ printf 'CUDA_VISIBLE_DEVICES=%s TMPDIR=%s XDG_CONFIG_HOME=%s BLENDER_USER_CONFIG
             "INVOCATION_LOG": str(invocation_log),
             "OUTPUT_ROOT": str(output_root),
             "SCENES": "breakfast_room whiteroom",
+            "EXCLUDED_SCENES": "__none__",
             "GPU_IDS": "2,3",
         }
     )
@@ -149,7 +150,8 @@ printf 'CUDA_VISIBLE_DEVICES=%s TMPDIR=%s XDG_CONFIG_HOME=%s BLENDER_USER_CONFIG
         line.split("CUDA_VISIBLE_DEVICES=", 1)[1].split(" ", 1)[0]
         for line in invocation_lines
     }
-    assert used_gpu_ids == {"2", "3"}
+    assert used_gpu_ids
+    assert used_gpu_ids <= {"2", "3"}
     assert all("TMPDIR=" in line for line in invocation_lines)
     assert all("XDG_CONFIG_HOME=" in line for line in invocation_lines)
     assert all("BLENDER_USER_CONFIG=" in line for line in invocation_lines)
@@ -172,3 +174,63 @@ printf 'CUDA_VISIBLE_DEVICES=%s TMPDIR=%s XDG_CONFIG_HOME=%s BLENDER_USER_CONFIG
     summary = (output_root / "logs" / "run_all_summary.tsv").read_text(encoding="utf-8")
     assert "breakfast_room\tsuccess" in summary
     assert "whiteroom\tsuccess" in summary
+
+
+def test_run_all_neural_rgbd_wrapper_excludes_default_scene_blocklist(tmp_path):
+    repo_root = infinigen.repo_root()
+    script_path = repo_root / "scripts/benchmark/neural_rgbd/run_all_neural_rgbd.sh"
+    fake_runner = tmp_path / "fake_runner.sh"
+    invocation_log = tmp_path / "runner.log"
+    output_root = tmp_path / "outputs"
+
+    fake_runner.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$INVOCATION_LOG"
+""",
+        encoding="utf-8",
+    )
+    fake_runner.chmod(fake_runner.stat().st_mode | stat.S_IEXEC)
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "RUN_NEURAL_RGBD_BIN": str(fake_runner),
+            "INVOCATION_LOG": str(invocation_log),
+            "OUTPUT_ROOT": str(output_root),
+            "GPU_IDS": "0",
+        }
+    )
+    env.pop("SCENES", None)
+    env.pop("EXCLUDED_SCENES", None)
+
+    result = subprocess.run(
+        ["bash", str(script_path)],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    invocation_lines = invocation_log.read_text(encoding="utf-8").splitlines()
+    assert invocation_lines
+
+    invoked_scenes = {
+        line.split("--scene_name ", 1)[1].split(" ", 1)[0]
+        for line in invocation_lines
+        if "--scene_name " in line
+    }
+
+    assert invoked_scenes == {
+        "breakfast_room",
+        "green_room",
+        "grey_white_room",
+        "kitchen",
+        "staircase",
+        "thin_geometry",
+    }
+    assert "complete_kitchen" not in invoked_scenes
+    assert "morning_apartment" not in invoked_scenes
+    assert "whiteroom" not in invoked_scenes

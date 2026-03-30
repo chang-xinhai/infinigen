@@ -11,6 +11,8 @@
 #   sl_proj_energy = 1000.0
 #
 # Neural RGB-D benchmark defaults:
+#   sl_baseline = 0.2
+#   sl_rgb_offset_scale = -0.5
 #   sl_proj_fov_delta_deg = 10.0
 #   sl_proj_energy = 1200.0
 #
@@ -18,5 +20,7 @@
 #   - If the pattern is only a bit too dim, try 1300.0 first.
 #   - If it starts to wash out highlights, go back toward 1100.0.
 
+render_structured_light.sl_baseline = 0.2
+render_structured_light.sl_rgb_offset_scale = -0.5
 render_structured_light.sl_proj_fov_delta_deg = 10.0
 render_structured_light.sl_proj_energy = 1200.0

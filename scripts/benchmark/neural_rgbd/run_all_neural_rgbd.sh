@@ -10,6 +10,7 @@ OUTPUT_ROOT="${OUTPUT_ROOT:-${REPO_ROOT}/outputs/benchmark/neural_rgbd}"
 POSE_SOURCE="${POSE_SOURCE:-blender_poses}"
 TASKS="${TASKS:-trajectory render structured_light}"
 SCENES="${SCENES:-ALL}"
+EXCLUDED_SCENES="${EXCLUDED_SCENES:-full_kitchen complete_kitchen morning_apartment whiteroom}"
 FRAME_START="${FRAME_START:-}"
 FRAME_END="${FRAME_END:-}"
 RENDER_ENGINE="${RENDER_ENGINE:-}"
@@ -36,10 +37,40 @@ discover_all_scenes() {
     find "${REPO_ROOT}/data/neural_rgbd/blendswap_scenes" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort
 }
 
+filter_excluded_scenes() {
+    local -a input_scenes=("$@")
+    local -a excluded_scenes=()
+    local scene_name
+    local excluded_name
+    local skip_scene
+
+    if [[ -n "${EXCLUDED_SCENES}" ]]; then
+        read -r -a excluded_scenes <<<"${EXCLUDED_SCENES}"
+    fi
+
+    for scene_name in "${input_scenes[@]}"; do
+        skip_scene=0
+        for excluded_name in "${excluded_scenes[@]}"; do
+            if [[ "${scene_name}" == "${excluded_name}" ]]; then
+                skip_scene=1
+                break
+            fi
+        done
+        if [[ "${skip_scene}" == "0" ]]; then
+            printf '%s\n' "${scene_name}"
+        fi
+    done
+}
+
 if [[ "${SCENES}" == "ALL" ]]; then
     mapfile -t SCENE_LIST < <(discover_all_scenes)
 else
     read -r -a SCENE_LIST <<<"${SCENES}"
+fi
+mapfile -t SCENE_LIST < <(filter_excluded_scenes "${SCENE_LIST[@]}")
+if [[ "${#SCENE_LIST[@]}" -eq 0 ]]; then
+    echo "No Neural RGB-D scenes left to process after applying EXCLUDED_SCENES=${EXCLUDED_SCENES}"
+    exit 1
 fi
 
 read -r -a TASK_LIST <<<"${TASKS}"
@@ -487,7 +518,9 @@ echo "scene	status	output_root	log_file" > "${SUMMARY_FILE}"
 
 echo "═══════════════════════════════════════════════════════════"
 echo "  Neural RGB-D Full Benchmark"
-echo "  Scenes: ${SCENES}"
+echo "  Requested scenes: ${SCENES}"
+echo "  Excluded scenes: ${EXCLUDED_SCENES:-<none>}"
+echo "  Effective scenes: ${SCENE_LIST[*]}"
 echo "  Pose source: ${POSE_SOURCE}"
 echo "  Tasks: ${TASKS}"
 echo "  Output root: ${OUTPUT_ROOT}"
