@@ -11,8 +11,11 @@ DATASET_ROOT="${DATASET_ROOT:-${REPO_ROOT}/data/neural_rgbd}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-${REPO_ROOT}/outputs/benchmark/neural_rgbd/scene_ply}"
 SCENES="${SCENES:-ALL}"
 ASCII_PLY="${ASCII_PLY:-0}"
-INCLUDE_HIDDEN="${INCLUDE_HIDDEN:-0}"
+INCLUDE_HIDDEN="${INCLUDE_HIDDEN:-1}"
 OVERWRITE="${OVERWRITE:-1}"
+POINT_SAMPLING_MODE="${POINT_SAMPLING_MODE:-surface}"
+POINT_SAMPLE_SPACING="${POINT_SAMPLE_SPACING:-0.05}"
+INCLUDE_VERTICES="${INCLUDE_VERTICES:-0}"
 
 discover_all_scenes() {
     local scene_name
@@ -68,6 +71,8 @@ run_export() {
         --
         --input_blend "${input_blend}"
         --output_path "${output_path}"
+        --sample_mode "${POINT_SAMPLING_MODE}"
+        --sample_spacing "${POINT_SAMPLE_SPACING}"
     )
 
     if [[ "${ASCII_PLY}" == "1" ]]; then
@@ -78,6 +83,9 @@ run_export() {
     fi
     if [[ "${OVERWRITE}" == "1" ]]; then
         cmd+=(--overwrite)
+    fi
+    if [[ "${INCLUDE_VERTICES}" == "1" ]]; then
+        cmd+=(--include_vertices)
     fi
 
     printf 'Export command:'

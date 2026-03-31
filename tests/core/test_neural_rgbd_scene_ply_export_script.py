@@ -81,5 +81,53 @@ fi
     assert any("--input_blend" in line and "breakfast_room/scene.blend" in line for line in invocation_lines)
     assert any("--input_blend" in line and "whiteroom/scene.blend" in line for line in invocation_lines)
     assert all("--ascii" in line for line in invocation_lines)
+    assert all("--sample_mode surface" in line for line in invocation_lines)
+    assert all("--sample_spacing 0.2" in line for line in invocation_lines)
     assert (output_root / "breakfast_room" / "breakfast_room.ply").exists()
     assert (output_root / "whiteroom" / "whiteroom.ply").exists()
+
+
+def test_export_all_neural_rgbd_scene_ply_forwards_surface_sampling_options(tmp_path):
+    repo_root = infinigen.repo_root()
+    script_path = repo_root / "scripts/benchmark/neural_rgbd/export_all_neural_rgbd_scene_ply.sh"
+    fake_python = tmp_path / "fake_python.sh"
+    invocation_log = tmp_path / "invocation.log"
+    dataset_root = tmp_path / "data" / "neural_rgbd"
+
+    _make_scene(dataset_root, "breakfast_room")
+
+    fake_python.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$INVOCATION_LOG"
+""",
+        encoding="utf-8",
+    )
+    fake_python.chmod(fake_python.stat().st_mode | stat.S_IEXEC)
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "PYTHON_BIN": str(fake_python),
+            "INVOCATION_LOG": str(invocation_log),
+            "DATASET_ROOT": str(dataset_root),
+            "SCENES": "breakfast_room",
+            "POINT_SAMPLING_MODE": "surface",
+            "POINT_SAMPLE_SPACING": "0.2",
+        }
+    )
+
+    result = subprocess.run(
+        ["bash", str(script_path)],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    invocation_lines = invocation_log.read_text(encoding="utf-8").splitlines()
+    assert len(invocation_lines) == 1
+    assert "--sample_mode surface" in invocation_lines[0]
+    assert "--sample_spacing 0.2" in invocation_lines[0]

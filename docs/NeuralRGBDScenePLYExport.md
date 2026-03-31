@@ -15,10 +15,16 @@ Current behavior:
 
 - opens the source `.blend`
 - evaluates mesh modifiers before export
-- exports vertices as points rather than writing mesh faces
+- defaults to approximately uniform world-space surface sampling
 - writes per-point normals as `nx ny nz`
 - skips hidden objects by default
 - supports optional inclusion of hidden objects
+
+Default export uses `surface` sampling. The point count is driven by surface area
+and `sample_spacing`, so the resulting point cloud density is much less sensitive
+to the underlying mesh tessellation. This is intended for evaluation and
+reconstruction workflows where reference point density should stay roughly
+uniform across the scene.
 
 ## Single Scene Export
 
@@ -28,6 +34,8 @@ Use the generic Blender-side exporter directly:
 python -m infinigen.launch_blender -m infinigen.tools.export_scene_ply -- \
     --input_blend data/neural_rgbd/blendswap_scenes/breakfast_room/scene.blend \
     --output_path outputs/benchmark/neural_rgbd/scene_ply/breakfast_room/breakfast_room.ply \
+    --sample_mode surface \
+    --sample_spacing 0.2 \
     --overwrite
 ```
 
@@ -35,11 +43,15 @@ Useful flags:
 
 - `--ascii` writes ASCII PLY instead of binary little-endian PLY
 - `--include_hidden` includes hidden objects
+- `--sample_mode vertices` exports only evaluated mesh vertices
+- `--sample_mode surface` exports approximately uniform surface samples
+- `--sample_spacing <float>` controls surface sample density in Blender world units
+- `--include_vertices` additionally includes original mesh vertices in surface mode
 - `--overwrite` replaces an existing output file
 
 ## Batch Export
 
-To export all benchmark scenes in one command:
+To export all benchmark scenes in one command with the default surface-sampled output:
 
 ```bash
 SCENES=ALL \
@@ -68,6 +80,9 @@ bash scripts/benchmark/neural_rgbd/export_all_neural_rgbd_scene_ply.sh
 - `SCENES` selects `ALL` or a space-separated subset
 - `ASCII_PLY=1` writes ASCII PLY
 - `INCLUDE_HIDDEN=1` includes hidden objects
+- `POINT_SAMPLING_MODE=surface` is the default and selects approximately uniform surface sampling
+- `POINT_SAMPLE_SPACING=0.2` is the default target spacing for surface mode
+- `INCLUDE_VERTICES=1` additionally includes raw mesh vertices in the export
 - `OVERWRITE=0` fails if the output already exists
 
 ## Validation
